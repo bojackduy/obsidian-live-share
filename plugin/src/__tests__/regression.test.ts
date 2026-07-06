@@ -46,6 +46,8 @@ function createSettings(overrides: Partial<LiveShareSettings> = {}): LiveShareSe
     excludePatterns: [],
     readOnlyPatterns: [],
     approvalTimeoutSeconds: 60,
+    useEmbeddedServer: false,
+    embeddedServerPort: 0,
     ...overrides,
   };
 }

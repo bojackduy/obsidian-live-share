@@ -28,11 +28,8 @@ export class RemoteNoteView extends ItemView {
   }
 
   static getActive(plugin: LiveSharePlugin): RemoteNoteView | null {
-    for (const leaf of plugin.app.workspace.getLeavesOfType(REMOTE_NOTE_VIEW_TYPE)) {
-      const view = leaf.view;
-      if (view instanceof RemoteNoteView && view.path) return view;
-    }
-    return null;
+    const view = plugin.app.workspace.getActiveViewOfType(RemoteNoteView);
+    return view?.path ? view : null;
   }
 
   getViewType(): string {

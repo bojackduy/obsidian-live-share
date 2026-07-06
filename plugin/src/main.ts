@@ -23,6 +23,7 @@ import { PRESENCE_VIEW_TYPE, type PresenceUser, PresenceView } from "./session/p
 import { SessionManager } from "./session/session";
 import { WORKSPACE_VIEW_TYPE, WorkspaceView } from "./session/workspace-view";
 import { ConnectionStateManager } from "./sync/connection-state";
+import { EmbeddedServer } from "./server/embedded-server";
 import { registerControlHandlers } from "./sync/control-handlers";
 import { ControlChannel } from "./sync/control-ws";
 import { E2ECrypto } from "./sync/crypto";
@@ -63,6 +64,7 @@ export default class LiveSharePlugin extends Plugin {
   connectionState!: ConnectionStateManager;
   logger!: DebugLogger;
 
+  embeddedServer: EmbeddedServer | null = null;
   canvasSync: CanvasSync | null = null;
   explorerIndicators: ExplorerIndicators | null = null;
   controlChannel: ControlChannel | null = null;
@@ -194,6 +196,36 @@ export default class LiveSharePlugin extends Plugin {
     return this.settings.githubUserId || this.settings.clientId;
   }
 
+  async ensureEmbeddedServer(): Promise<void> {
+    if (this.embeddedServer?.status.running) return;
+    if (this.embeddedServer) {
+      try { await this.embeddedServer.stop(); } catch { /* ignore */ }
+    }
+    const port = this.settings.embeddedServerPort || 0;
+    this.embeddedServer = new EmbeddedServer({
+      port,
+      serverPassword: this.settings.serverPassword || undefined,
+    });
+    try {
+      const actualPort = await this.embeddedServer.start();
+      this.settings.embeddedServerPort = actualPort;
+      this.settings.serverUrl = `http://127.0.0.1:${actualPort}`;
+      await this.saveSettings();
+      this.logger.log("server", `embedded server started on port ${actualPort}`);
+    } catch (err) {
+      this.logger.error("server", "failed to start embedded server", err);
+      this.embeddedServer = null;
+    }
+  }
+
+  async stopEmbeddedServer(): Promise<void> {
+    if (this.embeddedServer) {
+      await this.embeddedServer.stop();
+      this.embeddedServer = null;
+      this.logger.log("server", "embedded server stopped");
+    }
+  }
+
   async onload() {
     await this.loadSettings();
 
@@ -216,6 +248,10 @@ export default class LiveSharePlugin extends Plugin {
       } catch {
         // Config file may not exist or be invalid JSON
       }
+    }
+
+    if (this.settings.useEmbeddedServer) {
+      void this.ensureEmbeddedServer();
     }
 
     this.syncManager = new SyncManager(this.settings);
@@ -321,6 +357,7 @@ export default class LiveSharePlugin extends Plugin {
 
   onunload() {
     this.logger.destroy();
+    void this.stopEmbeddedServer();
     this.controlChannel?.destroy();
     this.controlChannel = null;
     this.explorerIndicators?.destroy();
@@ -698,10 +735,13 @@ export default class LiveSharePlugin extends Plugin {
           }
         }
         if (scrollTop !== undefined) {
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (view) {
-            const cmView = getCmView(view);
+          const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (mdView) {
+            const cmView = getCmView(mdView);
             if (cmView) cmView.scrollDOM.scrollTop = scrollTop;
+          } else {
+            const remoteView = this.app.workspace.getActiveViewOfType(RemoteNoteView);
+            if (remoteView?.editor) remoteView.editor.scrollDOM.scrollTop = scrollTop;
           }
         }
       },

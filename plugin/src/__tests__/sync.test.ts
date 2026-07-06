@@ -81,6 +81,8 @@ function makeSettings(overrides: Partial<LiveShareSettings> = {}): LiveShareSett
     approvalTimeoutSeconds: 60,
     permission: "read-write" as const,
     readOnlyPatterns: [] as string[],
+    useEmbeddedServer: false,
+    embeddedServerPort: 0,
     ...overrides,
   };
 }

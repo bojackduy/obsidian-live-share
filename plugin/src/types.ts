@@ -4,6 +4,8 @@ export type Permission = "read-write" | "read-only";
 
 export interface LiveShareSettings {
   serverUrl: string;
+  useEmbeddedServer: boolean;
+  embeddedServerPort: number;
   roomId: string;
   token: string;
   jwt: string;
@@ -29,6 +31,8 @@ export interface LiveShareSettings {
 
 export const DEFAULT_SETTINGS: LiveShareSettings = {
   serverUrl: "http://localhost:3000",
+  useEmbeddedServer: true,
+  embeddedServerPort: 0,
   roomId: "",
   token: "",
   jwt: "",

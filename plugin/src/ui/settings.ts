@@ -15,20 +15,89 @@ export class LiveShareSettingTab extends PluginSettingTab {
 
     const { settings, sessionManager, authManager } = this.plugin;
     const active = sessionManager.isActive;
+    const server = this.plugin.embeddedServer;
+    const srvStatus = server?.status;
+
+    new SettingGroup(containerEl)
+      .setHeading("Server")
+      .addSetting((setting) => {
+        setting
+          .setName("Built-in server")
+          .setDesc("Start a relay server inside Obsidian — no terminal needed")
+          .addToggle((toggle) =>
+            toggle.setValue(settings.useEmbeddedServer).onChange(async (value) => {
+              settings.useEmbeddedServer = value;
+              await this.plugin.saveSettings();
+              if (value) {
+                await this.plugin.ensureEmbeddedServer();
+              } else {
+                await this.plugin.stopEmbeddedServer();
+              }
+              this.display();
+            }),
+          );
+      })
+      .addSetting((setting) => {
+        const status = srvStatus?.running
+          ? `● Running on port ${srvStatus.port}`
+          : "○ Stopped";
+        setting
+          .setName(`Status: ${status}`)
+          .setDesc(srvStatus?.running
+            ? `${srvStatus.activeRooms} room(s), ${srvStatus.activeClients} client(s)`
+            : "Start the built-in server to host sessions")
+          .addButton((button) => {
+            if (srvStatus?.running) {
+              button.setButtonText("Restart").onClick(async () => {
+                await this.plugin.stopEmbeddedServer();
+                await this.plugin.ensureEmbeddedServer();
+                this.display();
+              });
+              button.setWarning();
+            } else {
+              button.setButtonText("Start").setCta().onClick(async () => {
+                await this.plugin.ensureEmbeddedServer();
+                this.display();
+              });
+            }
+          });
+        if (srvStatus?.running) {
+          setting.addButton((button) =>
+            button.setButtonText("Stop").setWarning().onClick(async () => {
+              await this.plugin.stopEmbeddedServer();
+              this.display();
+            }),
+          );
+        }
+      })
+      .addSetting((setting) => {
+        setting
+          .setName("Port")
+          .setDesc("0 = auto-assign a free port")
+          .addText((text) => {
+            text.setValue(String(settings.embeddedServerPort || "")).onChange(async (value) => {
+              const parsed = Number.parseInt(value, 10);
+              settings.embeddedServerPort = Number.isNaN(parsed) || parsed < 0 ? 0 : parsed;
+              await this.plugin.saveSettings();
+            });
+            text.inputEl.placeholder = "Auto";
+            if (srvStatus?.running) text.setDisabled(true);
+          });
+      });
 
     new SettingGroup(containerEl)
       .setHeading("Connection")
       .addSetting((setting) => {
         setting
           .setName("Server URL")
-          .setDesc("The server to connect to")
+          .setDesc(settings.useEmbeddedServer ? "Auto-set by the built-in server" : "The server to connect to")
           .addText((text) => {
             text.setValue(settings.serverUrl).onChange(async (value) => {
               settings.serverUrl = value;
               await this.plugin.saveSettings();
             });
             text.inputEl.placeholder = "http://localhost:3000";
-            if (active) text.setDisabled(true);
+            if (active || settings.useEmbeddedServer) text.setDisabled(true);
           });
       })
       .addSetting((setting) => {
