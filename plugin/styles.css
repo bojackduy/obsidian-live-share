@@ -88,9 +88,8 @@
   padding: 1px 4px;
   border-radius: 3px 3px 3px 0;
   white-space: nowrap;
-  color: var(--text-on-accent);
-  background: inherit;
-  background-color: currentColor;
+  color: #fff;
+  background-color: inherit;
   pointer-events: none;
   line-height: 1.2;
 }
