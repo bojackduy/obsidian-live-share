@@ -209,7 +209,11 @@ export default class LiveSharePlugin extends Plugin {
     try {
       const actualPort = await this.embeddedServer.start();
       this.settings.embeddedServerPort = actualPort;
-      this.settings.serverUrl = `http://127.0.0.1:${actualPort}`;
+      const autoUrl = `http://127.0.0.1:${actualPort}`;
+      const isDefault = /^https?:\/\/(127\.0\.0\.1|localhost):\d+$/.test(this.settings.serverUrl);
+      if (!this.settings.serverUrl || isDefault) {
+        this.settings.serverUrl = autoUrl;
+      }
       await this.saveSettings();
       this.logger.log("server", `embedded server started on port ${actualPort}`);
     } catch (err) {

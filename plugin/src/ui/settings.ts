@@ -90,14 +90,14 @@ export class LiveShareSettingTab extends PluginSettingTab {
       .addSetting((setting) => {
         setting
           .setName("Server URL")
-          .setDesc(settings.useEmbeddedServer ? "Auto-set by the built-in server" : "The server to connect to")
+          .setDesc(settings.useEmbeddedServer ? "Override with your ngrok/tunnel URL so the invite link works remotely" : "The server to connect to")
           .addText((text) => {
             text.setValue(settings.serverUrl).onChange(async (value) => {
               settings.serverUrl = value;
               await this.plugin.saveSettings();
             });
             text.inputEl.placeholder = "http://localhost:3000";
-            if (active || settings.useEmbeddedServer) text.setDisabled(true);
+            if (active) text.setDisabled(true);
           });
       })
       .addSetting((setting) => {
