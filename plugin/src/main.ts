@@ -352,6 +352,7 @@ export default class LiveSharePlugin extends Plugin {
         await this.backgroundSync.startAll("host");
         this.registerManifestChangeHandler();
       } else {
+        await this.backgroundSync.startAll("guest");
         this.onActiveFileChange();
       }
     } catch {
@@ -487,6 +488,7 @@ export default class LiveSharePlugin extends Plugin {
         try {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
+          await this.backgroundSync.startAll("guest");
           this.onActiveFileChange();
           this.logger.log("session", `joined, room=${this.settings.roomId}`);
           this.notify("Live Share: joined session, open a remote note to edit");
@@ -512,6 +514,7 @@ export default class LiveSharePlugin extends Plugin {
         try {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
+          await this.backgroundSync.startAll("guest");
           this.onActiveFileChange();
           this.logger.log("session", `joined via link, room=${this.settings.roomId}`);
           this.notify("Live Share: joined session, open a remote note to edit");
@@ -731,7 +734,7 @@ export default class LiveSharePlugin extends Plugin {
     ) {
       effectivePermission = "read-only";
     }
-    if (this.settings.role === "host") {
+    if (this.settings.role === "host" || this.settings.role === "guest") {
       void this.collabManager
         .activateForFile(
           cmView,

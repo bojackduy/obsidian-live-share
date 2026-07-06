@@ -213,8 +213,8 @@ if (isMain) {
         console.error(`[server] invalid PORT: ${process.env.PORT}`);
         process.exit(1);
       }
-      server.listen(port, () => {
-        console.debug(`[server] listening on :${port}`);
+      server.listen(port, "0.0.0.0", () => {
+        console.debug(`[server] listening on 0.0.0.0:${port}`);
       });
 
       let isShuttingDown = false;
