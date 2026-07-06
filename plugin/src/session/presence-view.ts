@@ -19,6 +19,7 @@ export interface PresenceUser {
 
 export class PresenceView extends ItemView {
   private users = new Map<string, PresenceUser>();
+  private localUserId = "";
   private onFollowRequest: ((userId: string) => void) | null = null;
   private onKickRequest: ((userId: string) => void) | null = null;
   private onSummonRequest: ((userId: string) => void) | null = null;
@@ -58,10 +59,12 @@ export class PresenceView extends ItemView {
     users: Map<string, PresenceUser>,
     isHost: boolean,
     followedUserId: string | null,
+    localUserId = "",
   ): void {
     this.users = users;
     this.isHost = isHost;
     this.followedUserId = followedUserId;
+    this.localUserId = localUserId;
     this.render();
   }
 
@@ -104,7 +107,8 @@ export class PresenceView extends ItemView {
     });
 
     for (const [userId, user] of this.users) {
-      const isFollowed = this.followedUserId === userId;
+      const isSelf = userId === this.localUserId;
+      const isFollowed = !isSelf && this.followedUserId === userId;
 
       const row = list.createEl("div", {
         cls: `live-share-user${isFollowed ? " is-followed" : ""}`,
@@ -148,7 +152,7 @@ export class PresenceView extends ItemView {
 
       const nameRow = info.createEl("div", { cls: "live-share-user-name-row" });
       nameRow.createEl("span", {
-        text: user.displayName,
+        text: isSelf ? `${user.displayName} (You)` : user.displayName,
         cls: "live-share-user-name",
       });
       if (user.isHost) {
@@ -170,6 +174,8 @@ export class PresenceView extends ItemView {
           cls: "live-share-user-file",
         });
       }
+
+      if (isSelf) continue;
 
       const actions = row.createEl("div", {
         cls: "live-share-user-actions",

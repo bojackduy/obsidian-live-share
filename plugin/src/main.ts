@@ -35,11 +35,13 @@ import { ExplorerIndicators } from "./ui/explorer-indicators";
 import { ConfirmModal, PromptModal } from "./ui/modals";
 import { LiveShareSettingTab } from "./ui/settings";
 import {
+  DEFAULT_CURSOR_COLOR,
   VAULT_EVENT_SETTLE_MS,
   ensureFolder,
   isTextFile,
   normalizePath,
   parseJwtPayload,
+  resolveCursorColor,
   toCanonicalPath,
   toLocalPath,
 } from "./utils";
@@ -651,7 +653,7 @@ export default class LiveSharePlugin extends Plugin {
       getUserId: () => this.userId,
       getDisplayName: () => this.settings.displayName,
       getAvatarUrl: () => this.settings.avatarUrl,
-      getCursorColor: () => this.settings.cursorColor,
+      getCursorColor: () => resolveCursorColor(this.userId, this.settings.cursorColor),
       getRole: () => this.settings.role ?? "guest",
       getCurrentFile: () => {
         const remote = RemoteNoteView.getActive(this);
@@ -736,6 +738,7 @@ export default class LiveSharePlugin extends Plugin {
       effectivePermission = "read-only";
     }
     if (this.settings.role === "host" || this.settings.role === "guest") {
+      const cursorColor = resolveCursorColor(this.userId, this.settings.cursorColor);
       void this.collabManager
         .activateForFile(
           cmView,
@@ -745,8 +748,8 @@ export default class LiveSharePlugin extends Plugin {
           effectivePermission,
           {
             name: this.settings.displayName,
-            color: this.settings.cursorColor,
-            colorLight: `${this.settings.cursorColor}33`,
+            color: cursorColor,
+            colorLight: `${cursorColor}33`,
           },
         )
         .then(() => {
@@ -908,12 +911,28 @@ export default class LiveSharePlugin extends Plugin {
 
   refreshPresenceView() {
     const leaves = this.app.workspace.getLeavesOfType(PRESENCE_VIEW_TYPE);
+    const merged = new Map(this.remoteUsers);
+    merged.set(this.userId, {
+      userId: this.userId,
+      displayName: this.settings.displayName,
+      cursorColor: resolveCursorColor(this.userId, this.settings.cursorColor),
+      currentFile: normalizePath(this.settings.role === "guest"
+        ? (RemoteNoteView.getActive(this)?.remotePath ?? "")
+        : this.app.workspace.getActiveViewOfType(MarkdownView)?.file?.path ?? ""),
+      avatarUrl: this.settings.avatarUrl || undefined,
+      isHost: this.settings.role === "host",
+      permission: this.settings.permission,
+    });
+    for (const [uid, user] of merged) {
+      user.cursorColor = resolveCursorColor(uid, user.cursorColor);
+    }
     for (const leaf of leaves) {
       const view = leaf.view as PresenceView;
       view.updateState(
-        this.remoteUsers,
+        merged,
         this.settings.role === "host",
         this.presenceManager?.getFollowTarget() ?? null,
+        this.userId,
       );
     }
   }

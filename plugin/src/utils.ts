@@ -183,6 +183,29 @@ export function getFileByPath(vault: Vault, path: string): TFile | null {
   return file instanceof TFile ? file : null;
 }
 
+const USER_COLORS = [
+  "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
+  "#911eb4", "#42d4f4", "#f032e6", "#bfef45", "#fabed4",
+  "#469990", "#dcbeff", "#9a6324", "#fffac8", "#800000",
+  "#aaffc3", "#808000", "#ffd8b1", "#000075", "#a9a9a9",
+];
+
+export const DEFAULT_CURSOR_COLOR = "#7c3aed";
+
+function hashString(s: string): number {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash) + s.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+export function resolveCursorColor(userId: string, configuredColor: string): string {
+  if (configuredColor !== DEFAULT_CURSOR_COLOR) return configuredColor;
+  return USER_COLORS[hashString(userId) % USER_COLORS.length];
+}
+
 export async function ensureFolder(vault: Vault, path: string): Promise<void> {
   const existing = vault.getAbstractFileByPath(path);
   if (existing instanceof TFolder) return;
