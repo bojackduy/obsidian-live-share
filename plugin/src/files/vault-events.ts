@@ -27,7 +27,9 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       if (!plugin.manifestManager.isSharedPath(originalPath)) return;
       if (plugin.fileOpsManager.isPathMuted(originalPath)) return;
       if (renamedPaths.has(originalPath)) return;
-      void plugin.fileOpsManager.onFileCreate(file);
+      if (plugin.settings.role === "host") {
+        void plugin.fileOpsManager.onFileCreate(file);
+      }
       if (plugin.settings.role === "host") {
         if (file instanceof TFile) {
           void (async () => {
@@ -59,7 +61,9 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       const run = () => {
         if (!plugin.manifestManager.isSharedPath(file.path)) return;
         if (plugin.fileOpsManager.isPathMuted(file.path)) return;
-        plugin.fileOpsManager.onFileDelete(file);
+        if (plugin.settings.role === "host") {
+          plugin.fileOpsManager.onFileDelete(file);
+        }
         if (plugin.settings.role === "host") {
           plugin.backgroundSync.onFileRemoved(file.path);
           plugin.manifestManager.removeFile(file.path);
@@ -90,7 +94,9 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
 
       const prev = pendingRename ?? Promise.resolve();
       const task = prev.then(async () => {
-        plugin.fileOpsManager.onFileRename(file, oldPath);
+        if (plugin.settings.role === "host") {
+          plugin.fileOpsManager.onFileRename(file, oldPath);
+        }
         plugin.backgroundSync.cancelSubscribe(oldPath);
         await plugin.backgroundSync.onFileRenamed(oldPath, file.path);
         if (plugin.settings.role === "host") {
@@ -125,7 +131,9 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
         void plugin.backgroundSync.handleLocalTextModify(file.path);
         return;
       }
-      void plugin.fileOpsManager.onFileModify(file);
+      if (plugin.settings.role === "host") {
+        void plugin.fileOpsManager.onFileModify(file);
+      }
       if (plugin.settings.role === "host") {
         void (async () => {
           try {

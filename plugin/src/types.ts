@@ -292,6 +292,38 @@ export interface HostChangedMessage {
   displayName: string;
 }
 
+export interface WorkspaceRequestMessage {
+  type: "workspace-request";
+}
+
+export interface WorkspaceResponseMessage {
+  type: "workspace-response";
+  rootName: string;
+  files: string[];
+}
+
+export interface TextPatchMessage {
+  type: "text-patch";
+  path: string;
+  seq?: number;
+  peer?: string;
+  lnum: number;
+  count: number;
+  lines: string[];
+}
+
+export interface TextSnapshotRequestMessage {
+  type: "text-snapshot-request";
+  path: string;
+}
+
+export interface TextSnapshotResponseMessage {
+  type: "text-snapshot-response";
+  path: string;
+  seq: number;
+  lines: string[];
+}
+
 export type ControlMessage =
   | FileOpMessage
   | ChunkStartMessage
@@ -319,7 +351,12 @@ export type ControlMessage =
   | HostTransferDeclineMessage
   | HostTransferCompleteMessage
   | HostDisconnectedMessage
-  | HostChangedMessage;
+  | HostChangedMessage
+  | WorkspaceRequestMessage
+  | WorkspaceResponseMessage
+  | TextPatchMessage
+  | TextSnapshotRequestMessage
+  | TextSnapshotResponseMessage;
 
 export type ControlMessageType = ControlMessage["type"];
 
@@ -351,4 +388,9 @@ export interface ControlMessageMap {
   "host-transfer-complete": HostTransferCompleteMessage;
   "host-disconnected": HostDisconnectedMessage;
   "host-changed": HostChangedMessage;
+  "workspace-request": WorkspaceRequestMessage;
+  "workspace-response": WorkspaceResponseMessage;
+  "text-patch": TextPatchMessage;
+  "text-snapshot-request": TextSnapshotRequestMessage;
+  "text-snapshot-response": TextSnapshotResponseMessage;
 }

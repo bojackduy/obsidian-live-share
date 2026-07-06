@@ -1,5 +1,5 @@
 import { minimatch } from "minimatch";
-import { MarkdownView, Notice, TFile } from "obsidian";
+import { MarkdownView, Notice, TFile, TFolder } from "obsidian";
 
 import type LiveSharePlugin from "../main";
 import type { ControlMessage, FileOp } from "../types";
@@ -51,6 +51,11 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     } else {
       if (paths.some((path) => !plugin.manifestManager.isSharedPath(path))) return;
     }
+
+    if (plugin.settings.role !== "host") {
+      return;
+    }
+
     plugin.fileOpsManager
       .applyRemoteOp(op, async () => {
         if (plugin.settings.role !== "host") return;
@@ -99,6 +104,7 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     "file-chunk-resume",
   ] as const) {
     channel.on(chunkType, (msg) => {
+      if (plugin.settings.role !== "host") return;
       if (!msg.path || !plugin.manifestManager.isSharedPath(msg.path)) return;
       plugin.fileOpsManager
         .applyRemoteOp({
@@ -165,6 +171,7 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     plugin.controlConnected = true;
     plugin.updateOnlineState();
     plugin.presenceManager?.broadcastPresence();
+    plugin.controlChannel?.send({ type: "workspace-request" });
   });
 
   channel.on("permission-update", (msg) => {
@@ -299,5 +306,76 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     } else {
       finish();
     }
+  });
+
+  channel.on("workspace-request", () => {
+    if (plugin.settings.role !== "host") return;
+    const files = plugin.app.vault
+      .getFiles()
+      .filter((f) => plugin.manifestManager.isSharedPath(f.path))
+      .map((f) => toCanonicalPath(normalizePath(f.path)));
+    const rootName = plugin.settings.sharedFolder
+      ? plugin.settings.sharedFolder.split("/").pop() ?? "vault"
+      : "vault";
+    plugin.controlChannel?.send({
+      type: "workspace-response",
+      rootName,
+      files,
+    });
+  });
+
+  channel.on("workspace-response", (msg) => {
+    if (plugin.settings.role !== "guest") return;
+    plugin.remoteWorkspaceFiles = msg.files;
+    plugin.remoteWorkspaceRootName = msg.rootName;
+    plugin.logger.log("workspace", `received ${msg.files.length} files`);
+    plugin.refreshPresenceView();
+  });
+
+  channel.on("text-patch", (msg) => {
+    if (plugin.settings.role === "host") {
+      const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(msg.path));
+      if (!(file instanceof TFile)) return;
+      void plugin.app.vault.read(file).then((content) => {
+        const lines = content.split("\n");
+        const fromLine = Math.max(0, msg.lnum);
+        const toLine = Math.min(fromLine + msg.count, lines.length);
+        lines.splice(fromLine, msg.count, ...msg.lines);
+        const newContent = lines.join("\n");
+        const seq = (plugin.remoteEditSeqMap.get(msg.path) ?? 0) + 1;
+        plugin.remoteEditSeqMap.set(msg.path, seq);
+        plugin.app.vault.modify(file, newContent);
+        plugin.controlChannel?.send({
+          type: "text-patch",
+          path: msg.path,
+          seq,
+          lnum: msg.lnum,
+          count: msg.count,
+          lines: msg.lines,
+        });
+      });
+    } else {
+      plugin.applyRemoteTextPatch(msg);
+    }
+  });
+
+  channel.on("text-snapshot-request", (msg) => {
+    if (plugin.settings.role !== "host") return;
+    const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(msg.path));
+    if (!(file instanceof TFile)) return;
+    void plugin.app.vault.read(file).then((content) => {
+      const seq = plugin.remoteEditSeqMap.get(msg.path) ?? 0;
+      plugin.controlChannel?.send({
+        type: "text-snapshot-response",
+        path: msg.path,
+        seq,
+        lines: content.split("\n"),
+      });
+    });
+  });
+
+  channel.on("text-snapshot-response", (msg) => {
+    if (plugin.settings.role !== "guest") return;
+    plugin.setRemoteNoteContent(msg.path, msg.seq, msg.lines);
   });
 }

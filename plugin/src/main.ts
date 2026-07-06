@@ -15,6 +15,7 @@ import { AuthManager } from "./session/auth";
 import { registerCommands } from "./session/commands";
 import { PresenceManager } from "./session/presence-manager";
 import { PRESENCE_VIEW_TYPE, type PresenceUser, PresenceView } from "./session/presence-view";
+import { REMOTE_NOTE_VIEW_TYPE, RemoteNoteView, setRemoteNotePlugin } from "./editor/remote-note-view";
 import { SessionManager } from "./session/session";
 import { ConnectionStateManager } from "./sync/connection-state";
 import { registerControlHandlers } from "./sync/control-handlers";
@@ -60,6 +61,10 @@ export default class LiveSharePlugin extends Plugin {
   controlChannel: ControlChannel | null = null;
   remoteUsers = new Map<string, PresenceUser>();
   remoteReadOnlyPatterns: string[] = [];
+  remoteWorkspaceFiles: string[] = [];
+  remoteWorkspaceRootName = "";
+  remoteEditSeqMap = new Map<string, number>();
+  remoteNoteOpenFile: ((path: string) => void) | null = null;
   presenceManager: PresenceManager | null = null;
   private connectionStateUnsub: (() => void) | null = null;
   statusBarEl!: HTMLElement;
@@ -86,6 +91,8 @@ export default class LiveSharePlugin extends Plugin {
     this.manifestManager.setManifestChangeHandler((added, removed, updated) => {
       this.manifestHandlerQueue = this.manifestHandlerQueue
         .then(async () => {
+          if (this.settings.role !== "host") return;
+
           const renamedOldPaths = new Set<string>();
           const renamedNewPaths = new Set<string>();
           if (added.length > 0 && removed.length > 0) {
@@ -244,6 +251,11 @@ export default class LiveSharePlugin extends Plugin {
       return view;
     });
 
+    this.registerView(REMOTE_NOTE_VIEW_TYPE, (leaf) => {
+      return new RemoteNoteView(leaf);
+    });
+    setRemoteNotePlugin(this);
+
     const ribbonEl = this.addRibbonIcon("users", "Collaborators", () => {
       void this.activatePresenceView();
     });
@@ -329,16 +341,8 @@ export default class LiveSharePlugin extends Plugin {
         await this.backgroundSync.startAll("host");
         this.registerManifestChangeHandler();
       } else {
-        await this.cleanupStaleFiles();
-        await this.manifestManager.syncFromManifest(
-          this.mutePathEvents,
-          this.unmutePathEvents,
-          this.requestBinaryFile,
-        );
-        await this.backgroundSync.startAll("guest");
-        this.registerManifestChangeHandler();
+        this.onActiveFileChange();
       }
-      this.onActiveFileChange();
     } catch {
       this.logger.error("session", "failed to resume session");
       await this.abortSession("Live Share: failed to resume previous session");
@@ -472,17 +476,9 @@ export default class LiveSharePlugin extends Plugin {
         try {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
-          await this.cleanupStaleFiles();
-          const syncedCount = await this.manifestManager.syncFromManifest(
-            this.mutePathEvents,
-            this.unmutePathEvents,
-            this.requestBinaryFile,
-          );
-          await this.backgroundSync.startAll("guest");
-          this.registerManifestChangeHandler();
           this.onActiveFileChange();
           this.logger.log("session", `joined, room=${this.settings.roomId}`);
-          this.notify(`Live Share: joined session, synced ${syncedCount} file(s)`);
+          this.notify("Live Share: joined session, open a remote note to edit");
         } catch {
           this.logger.error("session", "failed to join session");
           await this.abortSession("Live Share: failed to join session");
@@ -505,17 +501,9 @@ export default class LiveSharePlugin extends Plugin {
         try {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
-          await this.cleanupStaleFiles();
-          const syncedCount = await this.manifestManager.syncFromManifest(
-            this.mutePathEvents,
-            this.unmutePathEvents,
-            this.requestBinaryFile,
-          );
-          await this.backgroundSync.startAll("guest");
-          this.registerManifestChangeHandler();
           this.onActiveFileChange();
           this.logger.log("session", `joined via link, room=${this.settings.roomId}`);
-          this.notify(`Live Share: joined session, synced ${syncedCount} file(s)`);
+          this.notify("Live Share: joined session, open a remote note to edit");
         } catch {
           this.logger.error("session", "failed to join via link");
           await this.abortSession("Live Share: failed to join session");
@@ -910,6 +898,35 @@ export default class LiveSharePlugin extends Plugin {
     this.notify(`Live Share: set ${user.displayName} to ${newPermission}`);
   }
 
+  async openRemoteFile(path: string): Promise<void> {
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: REMOTE_NOTE_VIEW_TYPE,
+      state: { path },
+      active: true,
+    });
+  }
+
+  applyRemoteTextPatch(msg: import("./types").TextPatchMessage): void {
+    const leaves = this.app.workspace.getLeavesOfType(REMOTE_NOTE_VIEW_TYPE);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view instanceof RemoteNoteView) {
+        view.applyPatch(msg);
+      }
+    }
+  }
+
+  setRemoteNoteContent(path: string, seq: number, lines: string[]): void {
+    const leaves = this.app.workspace.getLeavesOfType(REMOTE_NOTE_VIEW_TYPE);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view instanceof RemoteNoteView) {
+        view.setContent(path, seq, lines);
+      }
+    }
+  }
+
   async fetchAuditLog() {
     if (!this.settings.serverUrl || !this.settings.roomId || !this.settings.token) return;
     try {
@@ -932,13 +949,6 @@ export default class LiveSharePlugin extends Plugin {
       this.presenceManager.togglePresent();
     }
     await this.saveSettings();
-    await this.backgroundSync.startAll("guest");
-    await this.cleanupStaleFiles();
-    await this.manifestManager.syncFromManifest(
-      this.mutePathEvents,
-      this.unmutePathEvents,
-      this.requestBinaryFile,
-    );
     this.notify("Live Share: reconnected as guest - another user is host");
     this.updateStatusBar();
     this.refreshPresenceView();
