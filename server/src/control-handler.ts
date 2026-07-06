@@ -38,6 +38,11 @@ const ALLOWED_TYPES = new Set([
   "host-transfer-decline",
   "host-changed",
   "host-disconnected",
+  "workspace-request",
+  "workspace-response",
+  "text-patch",
+  "text-snapshot-request",
+  "text-snapshot-response",
 ]);
 
 const MSG_RATE_WINDOW = 10_000;

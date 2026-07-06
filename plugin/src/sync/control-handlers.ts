@@ -336,15 +336,18 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     if (plugin.settings.role === "host") {
       const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(msg.path));
       if (!(file instanceof TFile)) return;
-      void plugin.app.vault.read(file).then((content) => {
+      const peerPerm = msg.peer ? plugin.remoteUsers.get(msg.peer)?.permission : undefined;
+      if (peerPerm === "read-only") return;
+      const prev = plugin.remoteEditQueues.get(msg.path) ?? Promise.resolve();
+      const next = prev.then(async () => {
+        const content = await plugin.app.vault.read(file);
         const lines = content.split("\n");
         const fromLine = Math.max(0, msg.lnum);
         const toLine = Math.min(fromLine + msg.count, lines.length);
         lines.splice(fromLine, msg.count, ...msg.lines);
-        const newContent = lines.join("\n");
         const seq = (plugin.remoteEditSeqMap.get(msg.path) ?? 0) + 1;
         plugin.remoteEditSeqMap.set(msg.path, seq);
-        plugin.app.vault.modify(file, newContent);
+        await plugin.app.vault.modify(file, lines.join("\n"));
         plugin.controlChannel?.send({
           type: "text-patch",
           path: msg.path,
@@ -354,6 +357,7 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
           lines: msg.lines,
         });
       });
+      plugin.remoteEditQueues.set(msg.path, next);
     } else {
       plugin.applyRemoteTextPatch(msg);
     }

@@ -64,6 +64,7 @@ export default class LiveSharePlugin extends Plugin {
   remoteWorkspaceFiles: string[] = [];
   remoteWorkspaceRootName = "";
   remoteEditSeqMap = new Map<string, number>();
+  remoteEditQueues = new Map<string, Promise<void>>();
   remoteNoteOpenFile: ((path: string) => void) | null = null;
   presenceManager: PresenceManager | null = null;
   private connectionStateUnsub: (() => void) | null = null;

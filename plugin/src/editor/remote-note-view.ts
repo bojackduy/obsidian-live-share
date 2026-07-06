@@ -17,7 +17,7 @@ export class RemoteNoteView extends ItemView {
   private editor: EditorView | null = null;
   private seq = 0;
   private path = "";
-  private contentLines: string[] = [];
+  private pendingSnapshot = false;
 
   constructor(leaf: import("obsidian").WorkspaceLeaf) {
     super(leaf);
@@ -50,21 +50,11 @@ export class RemoteNoteView extends ItemView {
       }),
     ];
 
-    const startState = EditorState.create({
-      doc: "",
-      extensions,
-    });
-
-    this.editor = new EditorView({
-      state: startState,
-      parent: container,
-    });
+    const startState = EditorState.create({ doc: "", extensions });
+    this.editor = new EditorView({ state: startState, parent: container });
 
     if (this.path && pluginInstance?.controlChannel) {
-      pluginInstance.controlChannel.send({
-        type: "text-snapshot-request",
-        path: this.path,
-      });
+      this.requestSnapshot();
     }
   }
 
@@ -79,104 +69,101 @@ export class RemoteNoteView extends ItemView {
 
   async setState(state: Record<string, unknown>): Promise<void> {
     this.path = (state.path as string) ?? "";
+    this.seq = 0;
+    this.pendingSnapshot = false;
     if (this.editor && this.path && pluginInstance?.controlChannel) {
-      pluginInstance.controlChannel.send({
-        type: "text-snapshot-request",
-        path: this.path,
+      this.editor.dispatch({
+        changes: { from: 0, to: this.editor.state.doc.length, insert: "" },
       });
+      this.requestSnapshot();
     }
   }
 
   setContent(path: string, seq: number, lines: string[]): void {
     if (path !== this.path) return;
     this.seq = seq;
-    this.contentLines = lines;
+    this.pendingSnapshot = false;
     const doc = lines.join("\n");
     if (this.editor) {
       this.editor.dispatch({
         changes: { from: 0, to: this.editor.state.doc.length, insert: doc },
+        annotations: Transaction.remote.of(true),
       });
     }
   }
 
   applyPatch(msg: TextPatchMessage): void {
-    if (msg.path !== this.path) return;
+    if (msg.path !== this.path || !this.editor) return;
 
     if (msg.seq !== undefined && msg.seq !== this.seq + 1) {
       this.requestSnapshot();
       return;
     }
-
     this.seq = msg.seq ?? this.seq + 1;
 
-    const fromLine = Math.max(0, msg.lnum);
-    const toLine = Math.min(fromLine + msg.count, this.contentLines.length);
+    const doc = this.editor.state.doc;
+    const maxLine = doc.lines;
 
-    const oldDoc = this.editor?.state.doc.toString() ?? "";
-    const offsetFrom = this.lineToOffset(oldDoc, fromLine);
-    const offsetTo = this.lineToOffset(oldDoc, toLine);
-    const insert = msg.lines.join("\n") + (msg.lines.length > 0 && fromLine < this.contentLines.length ? "\n" : "");
+    const fromLine = Math.max(1, msg.lnum + 1);
+    const toLine = Math.min(fromLine + msg.count, maxLine + 1);
 
-    if (this.editor) {
-      this.editor.dispatch({
-        changes: { from: offsetFrom, to: offsetTo, insert },
-        annotations: Transaction.remote.of(true),
-      });
-    }
+    const offsetFrom = doc.line(fromLine).from;
+    const offsetTo = toLine <= maxLine ? doc.line(toLine).from : doc.length;
 
-    this.contentLines.splice(fromLine, msg.count, ...msg.lines);
+    const insert = msg.lines.length > 0 ? msg.lines.join("\n") + "\n" : "";
+
+    this.editor.dispatch({
+      changes: { from: offsetFrom, to: offsetTo, insert },
+      annotations: Transaction.remote.of(true),
+    });
   }
 
-  private onDocChanged(update: import("@codemirror/view").ViewUpdate): void {
-    const isRemote = update.transactions.some((tr) => tr.annotation(Transaction.remote));
-    if (isRemote) return;
+  private onDocChanged(
+    update: import("@codemirror/view").ViewUpdate,
+  ): void {
+    if (update.transactions.some((tr) => tr.annotation(Transaction.remote))) return;
 
     for (const tr of update.transactions) {
       if (!tr.changes || tr.changes.empty) continue;
 
-      const changes: { lnum: number; count: number; lines: string[] }[] = [];
       tr.changes.iterChangedRanges(
         (fromA: number, toA: number, _fromB: number, _toB: number) => {
-          const fromLine = this.editor?.state.doc.lineAt(fromA)?.number ?? 0;
-          const oldContent = this.oldDoc.slice(fromA, toA);
-          const count = oldContent ? oldContent.split("\n").length - 1 : 0;
-          const newContent = this.editor?.state.doc.sliceString(fromA, toA) ?? "";
+          const oldLine = update.startState.doc.lineAt(fromA).number;
+          const oldContent = update.startState.doc.sliceString(fromA, toA);
+          const count = oldContent ? oldContent.split("\n").length - (toA > fromA ? 1 : 0) : 0;
+          const newContent = this.editor?.state.doc.sliceString(
+            _fromB,
+            _toB,
+          ) ?? "";
           const lines = newContent ? newContent.split("\n") : [];
-          changes.push({ lnum: fromLine - 1, count, lines });
+          if (newContent.endsWith("\n") && lines.length > 0) {
+            lines.pop();
+          }
+
+          this.sendPatch(oldLine - 1, count, lines);
         },
       );
-
-      for (const c of changes) {
-        pluginInstance?.controlChannel?.send({
-          type: "text-patch",
-          path: this.path,
-          lnum: c.lnum,
-          count: c.count,
-          lines: c.lines,
-        });
-
-        this.contentLines.splice(c.lnum, c.count, ...c.lines);
-      }
     }
   }
 
-  private get oldDoc(): string {
-    return this.contentLines.join("\n");
+  private sendPatch(lnum: number, count: number, lines: string[]): void {
+    const userId = pluginInstance?.settings.githubUserId || pluginInstance?.settings.clientId || "";
+    pluginInstance?.controlChannel?.send({
+      type: "text-patch",
+      path: this.path,
+      peer: userId,
+      lnum,
+      count,
+      lines,
+    });
   }
 
   private requestSnapshot(): void {
+    if (this.pendingSnapshot) return;
+    this.pendingSnapshot = true;
     pluginInstance?.controlChannel?.send({
       type: "text-snapshot-request",
       path: this.path,
     });
-  }
-
-  private lineToOffset(doc: string, line: number): number {
-    const lines = doc.split("\n");
-    let offset = 0;
-    for (let i = 0; i < Math.min(line, lines.length); i++) {
-      offset += lines[i].length + 1;
-    }
-    return offset;
   }
 }
