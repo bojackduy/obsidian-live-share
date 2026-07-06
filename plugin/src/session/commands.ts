@@ -62,6 +62,16 @@ export function registerCommands(plugin: LiveSharePlugin): void {
   });
 
   plugin.addCommand({
+    id: "show-remote-workspace",
+    name: "Show remote workspace browser",
+    checkCallback: (checking) => {
+      if (plugin.settings.role !== "guest" || !plugin.sessionManager.isActive) return false;
+      if (checking) return true;
+      void plugin.activateWorkspaceView();
+    },
+  });
+
+  plugin.addCommand({
     id: "log-in",
     name: "Log in with GitHub",
     callback: () => void plugin.authManager.authenticate(),

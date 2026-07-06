@@ -7,6 +7,11 @@ import { CollabManager } from "./editor/collab";
 import { BackgroundSync } from "./files/background-sync";
 import { CanvasSync } from "./files/canvas-sync";
 
+import {
+  REMOTE_NOTE_VIEW_TYPE,
+  RemoteNoteView,
+  setRemoteNotePlugin,
+} from "./editor/remote-note-view";
 import { ExclusionManager } from "./files/exclusion";
 import { FileOpsManager } from "./files/file-ops";
 import { ManifestManager } from "./files/manifest";
@@ -15,8 +20,8 @@ import { AuthManager } from "./session/auth";
 import { registerCommands } from "./session/commands";
 import { PresenceManager } from "./session/presence-manager";
 import { PRESENCE_VIEW_TYPE, type PresenceUser, PresenceView } from "./session/presence-view";
-import { REMOTE_NOTE_VIEW_TYPE, RemoteNoteView, setRemoteNotePlugin } from "./editor/remote-note-view";
 import { SessionManager } from "./session/session";
+import { WORKSPACE_VIEW_TYPE, WorkspaceView } from "./session/workspace-view";
 import { ConnectionStateManager } from "./sync/connection-state";
 import { registerControlHandlers } from "./sync/control-handlers";
 import { ControlChannel } from "./sync/control-ws";
@@ -66,6 +71,7 @@ export default class LiveSharePlugin extends Plugin {
   remoteEditSeqMap = new Map<string, number>();
   remoteEditQueues = new Map<string, Promise<void>>();
   remoteNoteOpenFile: ((path: string) => void) | null = null;
+  private remoteWorkspaceAutoOpened = false;
   presenceManager: PresenceManager | null = null;
   private connectionStateUnsub: (() => void) | null = null;
   statusBarEl!: HTMLElement;
@@ -256,6 +262,10 @@ export default class LiveSharePlugin extends Plugin {
       return new RemoteNoteView(leaf);
     });
     setRemoteNotePlugin(this);
+
+    this.registerView(WORKSPACE_VIEW_TYPE, (leaf) => {
+      return new WorkspaceView(leaf, this);
+    });
 
     const ribbonEl = this.addRibbonIcon("users", "Collaborators", () => {
       void this.activatePresenceView();
@@ -624,11 +634,12 @@ export default class LiveSharePlugin extends Plugin {
 
     this.explorerIndicators = new ExplorerIndicators();
     this.canvasSync = new CanvasSync(this.app.vault, this.syncManager, this.fileOpsManager);
-    const entries = this.manifestManager.getEntries();
-    const role = this.settings.role === "host" ? "host" : "guest";
-    for (const [path] of entries) {
-      if (isTextFile(path) && path.endsWith(".canvas")) {
-        void this.canvasSync.subscribe(path, role);
+    if (this.settings.role === "host") {
+      const entries = this.manifestManager.getEntries();
+      for (const [path] of entries) {
+        if (isTextFile(path) && path.endsWith(".canvas")) {
+          void this.canvasSync.subscribe(path, "host");
+        }
       }
     }
 
@@ -639,16 +650,25 @@ export default class LiveSharePlugin extends Plugin {
       getCursorColor: () => this.settings.cursorColor,
       getRole: () => this.settings.role ?? "guest",
       getCurrentFile: () => {
+        const remote = RemoteNoteView.getActive(this);
+        if (remote) return remote.remotePath;
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         return activeView?.file?.path ?? "";
       },
       getScrollTop: () => {
+        const remote = RemoteNoteView.getActive(this);
+        if (remote?.editor) return remote.editor.scrollDOM.scrollTop;
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (!activeView) return 0;
         const cmView = getCmView(activeView);
         return cmView ? cmView.scrollDOM.scrollTop : 0;
       },
       getCursorLine: () => {
+        const remote = RemoteNoteView.getActive(this);
+        if (remote?.editor) {
+          const pos = remote.editor.state.selection.main.head;
+          return pos !== undefined ? remote.editor.state.doc.lineAt(pos).number - 1 : 0;
+        }
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         return activeView ? activeView.editor.getCursor().line : 0;
       },
@@ -656,12 +676,19 @@ export default class LiveSharePlugin extends Plugin {
       getRemoteUsers: () => this.remoteUsers,
       notify: (msg) => this.notify(msg),
       openFileAndScroll: async (filePath, scrollTop) => {
-        const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
-        if (currentView?.file?.path !== toLocalPath(filePath)) {
-          const file = this.app.vault.getAbstractFileByPath(toLocalPath(filePath));
-          if (file instanceof TFile) {
-            await this.app.workspace.getLeaf().openFile(file);
-            this.onActiveFileChange();
+        if (this.settings.role === "guest") {
+          const remote = RemoteNoteView.getActive(this);
+          if (remote?.remotePath !== filePath) {
+            await this.openRemoteFile(filePath);
+          }
+        } else {
+          const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (currentView?.file?.path !== toLocalPath(filePath)) {
+            const file = this.app.vault.getAbstractFileByPath(toLocalPath(filePath));
+            if (file instanceof TFile) {
+              await this.app.workspace.getLeaf().openFile(file);
+              this.onActiveFileChange();
+            }
           }
         }
         if (scrollTop !== undefined) {
@@ -692,7 +719,9 @@ export default class LiveSharePlugin extends Plugin {
       filePath && this.manifestManager.isSharedPath(filePath) && isTextFile(filePath)
         ? toCanonicalPath(normalizePath(filePath))
         : null;
-    this.backgroundSync.setActiveFile(sharedPath);
+    if (this.settings.role === "host") {
+      this.backgroundSync.setActiveFile(sharedPath);
+    }
     this.backgroundSync.setCollabBoundFile(null);
     let effectivePermission = this.settings.permission;
     if (
@@ -702,22 +731,24 @@ export default class LiveSharePlugin extends Plugin {
     ) {
       effectivePermission = "read-only";
     }
-    void this.collabManager
-      .activateForFile(
-        cmView,
-        sharedPath,
-        this.syncManager,
-        this.settings.role,
-        effectivePermission,
-        {
-          name: this.settings.displayName,
-          color: this.settings.cursorColor,
-          colorLight: `${this.settings.cursorColor}33`,
-        },
-      )
-      .then(() => {
-        this.backgroundSync.setCollabBoundFile(sharedPath);
-      });
+    if (this.settings.role === "host") {
+      void this.collabManager
+        .activateForFile(
+          cmView,
+          sharedPath,
+          this.syncManager,
+          this.settings.role,
+          effectivePermission,
+          {
+            name: this.settings.displayName,
+            color: this.settings.cursorColor,
+            colorLight: `${this.settings.cursorColor}33`,
+          },
+        )
+        .then(() => {
+          this.backgroundSync.setCollabBoundFile(sharedPath);
+        });
+    }
 
     this.removeScrollListener();
     const scrollDOM = cmView.scrollDOM;
@@ -854,6 +885,19 @@ export default class LiveSharePlugin extends Plugin {
     const leaf = this.app.workspace.getRightLeaf(false);
     if (leaf) {
       await leaf.setViewState({ type: PRESENCE_VIEW_TYPE, active: true });
+      this.app.workspace.revealLeaf(leaf);
+    }
+  }
+
+  async activateWorkspaceView(): Promise<void> {
+    const existing = this.app.workspace.getLeavesOfType(WORKSPACE_VIEW_TYPE);
+    if (existing.length > 0) {
+      this.app.workspace.revealLeaf(existing[0]);
+      return;
+    }
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (leaf) {
+      await leaf.setViewState({ type: WORKSPACE_VIEW_TYPE, active: true });
       this.app.workspace.revealLeaf(leaf);
     }
   }

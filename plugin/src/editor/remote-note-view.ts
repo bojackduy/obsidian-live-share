@@ -1,5 +1,5 @@
 import { EditorState, type Extension, Transaction } from "@codemirror/state";
-import { EditorView, lineNumbers, highlightActiveLine } from "@codemirror/view";
+import { EditorView, highlightActiveLine, lineNumbers } from "@codemirror/view";
 import { ItemView } from "obsidian";
 
 import type LiveSharePlugin from "../main";
@@ -14,8 +14,11 @@ export function setRemoteNotePlugin(plugin: LiveSharePlugin): void {
 }
 
 export class RemoteNoteView extends ItemView {
-  private editor: EditorView | null = null;
+  editor: EditorView | null = null;
   private seq = 0;
+  get remotePath(): string {
+    return this.path;
+  }
   private path = "";
   private pendingSnapshot = false;
 
@@ -23,12 +26,20 @@ export class RemoteNoteView extends ItemView {
     super(leaf);
   }
 
+  static getActive(plugin: LiveSharePlugin): RemoteNoteView | null {
+    for (const leaf of plugin.app.workspace.getLeavesOfType(REMOTE_NOTE_VIEW_TYPE)) {
+      const view = leaf.view;
+      if (view instanceof RemoteNoteView && view.path) return view;
+    }
+    return null;
+  }
+
   getViewType(): string {
     return REMOTE_NOTE_VIEW_TYPE;
   }
 
   getDisplayText(): string {
-    return this.path ? this.path.split("/").pop() ?? "Remote Note" : "Remote Note";
+    return this.path ? (this.path.split("/").pop() ?? "Remote Note") : "Remote Note";
   }
 
   getIcon(): string {
@@ -47,11 +58,18 @@ export class RemoteNoteView extends ItemView {
         if (update.docChanged) {
           this.onDocChanged(update);
         }
+        if (update.selectionSet) {
+          pluginInstance?.presenceManager?.debouncedBroadcastPresence();
+        }
       }),
     ];
 
     const startState = EditorState.create({ doc: "", extensions });
     this.editor = new EditorView({ state: startState, parent: container });
+
+    this.editor.scrollDOM.addEventListener("scroll", () => {
+      pluginInstance?.presenceManager?.debouncedBroadcastPresence();
+    });
 
     if (this.path && pluginInstance?.controlChannel) {
       this.requestSnapshot();
@@ -110,7 +128,7 @@ export class RemoteNoteView extends ItemView {
     const offsetFrom = doc.line(fromLine).from;
     const offsetTo = toLine <= maxLine ? doc.line(toLine).from : doc.length;
 
-    const insert = msg.lines.length > 0 ? msg.lines.join("\n") + "\n" : "";
+    const insert = msg.lines.length > 0 ? `${msg.lines.join("\n")}\n` : "";
 
     this.editor.dispatch({
       changes: { from: offsetFrom, to: offsetTo, insert },
@@ -118,31 +136,24 @@ export class RemoteNoteView extends ItemView {
     });
   }
 
-  private onDocChanged(
-    update: import("@codemirror/view").ViewUpdate,
-  ): void {
+  private onDocChanged(update: import("@codemirror/view").ViewUpdate): void {
     if (update.transactions.some((tr) => tr.annotation(Transaction.remote))) return;
 
     for (const tr of update.transactions) {
       if (!tr.changes || tr.changes.empty) continue;
 
-      tr.changes.iterChangedRanges(
-        (fromA: number, toA: number, _fromB: number, _toB: number) => {
-          const oldLine = update.startState.doc.lineAt(fromA).number;
-          const oldContent = update.startState.doc.sliceString(fromA, toA);
-          const count = oldContent ? oldContent.split("\n").length - (toA > fromA ? 1 : 0) : 0;
-          const newContent = this.editor?.state.doc.sliceString(
-            _fromB,
-            _toB,
-          ) ?? "";
-          const lines = newContent ? newContent.split("\n") : [];
-          if (newContent.endsWith("\n") && lines.length > 0) {
-            lines.pop();
-          }
+      tr.changes.iterChangedRanges((fromA: number, toA: number, _fromB: number, _toB: number) => {
+        const oldLine = update.startState.doc.lineAt(fromA).number;
+        const oldContent = update.startState.doc.sliceString(fromA, toA);
+        const count = oldContent ? oldContent.split("\n").length - (toA > fromA ? 1 : 0) : 0;
+        const newContent = this.editor?.state.doc.sliceString(_fromB, _toB) ?? "";
+        const lines = newContent ? newContent.split("\n") : [];
+        if (newContent.endsWith("\n") && lines.length > 0) {
+          lines.pop();
+        }
 
-          this.sendPatch(oldLine - 1, count, lines);
-        },
-      );
+        this.sendPatch(oldLine - 1, count, lines);
+      });
     }
   }
 

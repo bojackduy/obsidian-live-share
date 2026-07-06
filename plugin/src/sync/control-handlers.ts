@@ -315,7 +315,7 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
       .filter((f) => plugin.manifestManager.isSharedPath(f.path))
       .map((f) => toCanonicalPath(normalizePath(f.path)));
     const rootName = plugin.settings.sharedFolder
-      ? plugin.settings.sharedFolder.split("/").pop() ?? "vault"
+      ? (plugin.settings.sharedFolder.split("/").pop() ?? "vault")
       : "vault";
     plugin.controlChannel?.send({
       type: "workspace-response",

@@ -94,14 +94,11 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
 
       const prev = pendingRename ?? Promise.resolve();
       const task = prev.then(async () => {
-        if (plugin.settings.role === "host") {
-          plugin.fileOpsManager.onFileRename(file, oldPath);
-        }
+        if (plugin.settings.role !== "host") return;
+        plugin.fileOpsManager.onFileRename(file, oldPath);
         plugin.backgroundSync.cancelSubscribe(oldPath);
         await plugin.backgroundSync.onFileRenamed(oldPath, file.path);
-        if (plugin.settings.role === "host") {
-          plugin.manifestManager.renameFile(oldPath, file.path, plugin.syncManager);
-        }
+        plugin.manifestManager.renameFile(oldPath, file.path, plugin.syncManager);
         const activeFile = plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file;
         if (activeFile && (activeFile.path === file.path || activeFile.path === oldPath)) {
           plugin.onActiveFileChange();
@@ -120,6 +117,7 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       if (plugin.fileOpsManager.isPathMuted(file.path)) return;
 
       if (isTextFile(file.path)) {
+        if (plugin.settings.role !== "host") return;
         if (plugin.backgroundSync.isRecentDiskWrite(file.path)) return;
         if (
           file.path.endsWith(".canvas") &&

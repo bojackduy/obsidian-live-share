@@ -186,6 +186,64 @@ describe("ControlChannel", () => {
 
       expect(handler).not.toHaveBeenCalled();
     });
+
+    it("dispatches workspace-request messages", () => {
+      const handler = vi.fn();
+      channel.on("workspace-request", handler);
+
+      const ws = connectAndGetWs(channel);
+      ws.simulateMessage(JSON.stringify({ type: "workspace-request" }));
+
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it("dispatches text-patch messages", () => {
+      const handler = vi.fn();
+      channel.on("text-patch", handler);
+
+      const ws = connectAndGetWs(channel);
+      ws.simulateMessage(
+        JSON.stringify({
+          type: "text-patch",
+          path: "doc.md",
+          lnum: 0,
+          count: 1,
+          lines: ["hello"],
+        }),
+      );
+
+      expect(handler).toHaveBeenCalledOnce();
+      const msg = handler.mock.calls[0][0];
+      expect(msg.lnum).toBe(0);
+      expect(msg.lines).toEqual(["hello"]);
+    });
+
+    it("dispatches text-snapshot-request messages", () => {
+      const handler = vi.fn();
+      channel.on("text-snapshot-request", handler);
+
+      const ws = connectAndGetWs(channel);
+      ws.simulateMessage(JSON.stringify({ type: "text-snapshot-request", path: "doc.md" }));
+
+      expect(handler).toHaveBeenCalledOnce();
+    });
+
+    it("dispatches text-snapshot-response messages", () => {
+      const handler = vi.fn();
+      channel.on("text-snapshot-response", handler);
+
+      const ws = connectAndGetWs(channel);
+      ws.simulateMessage(
+        JSON.stringify({
+          type: "text-snapshot-response",
+          path: "doc.md",
+          seq: 5,
+          lines: ["a", "b"],
+        }),
+      );
+
+      expect(handler).toHaveBeenCalledOnce();
+    });
   });
 
   describe("send", () => {
