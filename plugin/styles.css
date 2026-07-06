@@ -73,15 +73,14 @@
 }
 
 /* Remote cursor labels */
-.yRemoteSelectionHead {
+.cm-ySelectionCaret {
   position: relative;
   border-left: 2px solid;
-  border-color: inherit;
+  border-right: none;
   margin-left: -1px;
 }
 
-.yRemoteSelectionHead::after {
-  content: attr(data-name);
+.cm-ySelectionCaret > .cm-ySelectionInfo {
   position: absolute;
   top: -1.4em;
   left: -1px;
@@ -96,7 +95,7 @@
   line-height: 1.2;
 }
 
-.yRemoteSelection {
+.cm-ySelection {
   opacity: 0.3;
 }
 

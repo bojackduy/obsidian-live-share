@@ -1,4 +1,5 @@
 import { Notice, requestUrl } from "obsidian";
+import { debugLog } from "../debug-logger";
 
 import type LiveSharePlugin from "../main";
 
@@ -22,6 +23,8 @@ export class SessionManager {
     const { settings } = this.plugin;
     const baseUrl = settings.serverUrl.replace(/\/+$/, "");
 
+    debugLog("session", `Creating room at ${baseUrl}/rooms`);
+
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
@@ -42,11 +45,14 @@ export class SessionManager {
       });
       if (createResponse.status >= 400) {
         const errMsg = createResponse.json?.error ?? "unknown error";
+        debugLog("session", `Room creation failed: ${errMsg}`);
         new Notice(`Live Share: ${errMsg}`);
         return false;
       }
       roomData = createResponse.json;
+      debugLog("session", `Room created: ${roomData.id}`);
     } catch {
+      debugLog("session", "Room creation failed: cannot reach server");
       new Notice("Live Share: cannot reach server");
       return false;
     }
@@ -63,6 +69,7 @@ export class SessionManager {
 
   async joinSession(inviteString: string): Promise<boolean> {
     const parsedInvite = parseInvite(inviteString);
+    debugLog("session", `Parsed invite: server=${parsedInvite?.s ?? "?"}, room=${parsedInvite?.r ?? "?"}`);
     if (!parsedInvite) {
       new Notice("Live Share: invalid invite string");
       return false;
@@ -77,6 +84,7 @@ export class SessionManager {
     };
     if (serverPassword) joinHeaders["X-Server-Password"] = serverPassword;
 
+    debugLog("session", `Joining room ${parsedInvite.r}`);
     try {
       const joinResponse = await requestUrl({
         url: `${baseUrl}/rooms/${parsedInvite.r}/join`,
@@ -87,10 +95,12 @@ export class SessionManager {
       });
       if (joinResponse.status >= 400) {
         const errMsg = joinResponse.json?.error ?? "unknown error";
+        debugLog("session", `Join failed: ${errMsg}`);
         new Notice(`Live Share: ${errMsg}`);
         return false;
       }
     } catch {
+      debugLog("session", "Join failed: cannot reach server");
       new Notice("Live Share: cannot reach server");
       return false;
     }
@@ -102,11 +112,12 @@ export class SessionManager {
     if (parsedInvite.p) settings.serverPassword = parsedInvite.p;
     settings.role = "guest";
     await this.plugin.saveSettings();
-
+    debugLog("session", "Joined room successfully");
     return true;
   }
 
   async endSession(): Promise<void> {
+    debugLog("session", "Cleaning up session");
     const { settings } = this.plugin;
 
     if (settings.role === "host" && settings.roomId && settings.token) {
@@ -146,6 +157,7 @@ export class SessionManager {
       return;
     }
 
+    debugLog("session", "Generating invite link");
     const payload: InvitePayload = {
       s: settings.serverUrl,
       r: settings.roomId,

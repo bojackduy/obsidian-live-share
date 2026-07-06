@@ -16,6 +16,7 @@ import {
 } from "../utils";
 import type { FileOpsManager } from "./file-ops";
 import type { ManifestManager } from "./manifest";
+import { debugLog } from "../debug-logger";
 
 const DEBOUNCE_MS = 1000;
 
@@ -47,6 +48,7 @@ export class BackgroundSync {
     this.running = true;
     this.role = role;
     const entries = this.manifestManager.getEntries();
+    debugLog("bg-sync", `startAll: ${entries.size} files`);
     for (const [path, entry] of entries) {
       if (!isTextFile(path) || entry.binary) continue;
       try {
@@ -66,6 +68,7 @@ export class BackgroundSync {
 
   async subscribe(rawPath: string): Promise<void> {
     const path = toCanonicalPath(normalizePath(rawPath));
+    debugLog("bg-sync", `subscribe: path=${path} role=${this.role}`);
     if (this.observers.has(path) || this.subscribing.has(path)) return;
     this.cancelledSubscribes.delete(path);
     this.subscribing.add(path);
@@ -93,12 +96,15 @@ export class BackgroundSync {
           const remoteContent = docHandle.text.toString();
           if (remoteContent.length === 0) {
             // No remote content yet - host seeds the Y.Text
+            debugLog("bg-sync", `subscribe: ${path} host seeding Y.Text (len=${content.length})`);
             applyMinimalYTextUpdate(docHandle.doc, docHandle.text, content);
             this.lastWrittenContent.set(path, content);
           } else if (remoteContent !== content) {
             // Remote has content (from guests or prior sync) - write remote to disk instead
+            debugLog("bg-sync", `subscribe: ${path} host writing remote to disk (remoteLen=${remoteContent.length})`);
             await this.writeToDisk(path, remoteContent);
           } else {
+            debugLog("bg-sync", `subscribe: ${path} host content matches, skipping disk write`);
             this.lastWrittenContent.set(path, content);
           }
         }
@@ -114,10 +120,13 @@ export class BackgroundSync {
         }
         const file = getFileByPath(this.vault, diskPath);
         const remoteContent = docHandle.text.toString();
+        debugLog("bg-sync", `subscribe: ${path} guest remoteLen=${remoteContent.length}`);
         const localContent = file ? normalizeLineEndings(await this.vault.read(file)) : "";
         if (remoteContent !== localContent) {
+          debugLog("bg-sync", `subscribe: ${path} guest writing remote to disk`);
           await this.writeToDisk(path, remoteContent);
         } else {
+          debugLog("bg-sync", `subscribe: ${path} guest content matches, skipping disk write`);
           this.lastWrittenContent.set(path, localContent);
         }
       }
@@ -133,6 +142,7 @@ export class BackgroundSync {
 
   unsubscribe(rawPath: string): void {
     const path = toCanonicalPath(normalizePath(rawPath));
+    debugLog("bg-sync", `unsubscribe: ${path}`);
     this.flushWrite(path);
     const unobserve = this.observers.get(path);
     if (unobserve) {
@@ -165,12 +175,14 @@ export class BackgroundSync {
 
   async onFileAdded(rawPath: string): Promise<void> {
     const path = toCanonicalPath(normalizePath(rawPath));
+    debugLog("bg-sync", `onFileAdded: ${path}`);
     if (!isTextFile(path)) return;
     await this.subscribe(path);
   }
 
   onFileRemoved(rawPath: string): void {
     const path = toCanonicalPath(normalizePath(rawPath));
+    debugLog("bg-sync", `onFileRemoved: ${path}`);
     const timer = this.writeTimers.get(path);
     if (timer) {
       clearTimeout(timer);
@@ -187,6 +199,7 @@ export class BackgroundSync {
   async onFileRenamed(oldPath: string, newPath: string): Promise<void> {
     const normOld = toCanonicalPath(normalizePath(oldPath));
     const normNew = toCanonicalPath(normalizePath(newPath));
+    debugLog("bg-sync", `onFileRenamed: ${normOld} -> ${normNew}`);
 
     const timer = this.writeTimers.get(normOld);
     if (timer) {
@@ -244,8 +257,14 @@ export class BackgroundSync {
 
   async handleLocalTextModify(rawPath: string): Promise<void> {
     const path = toCanonicalPath(normalizePath(rawPath));
-    if (this.recentDiskWrites.has(path)) return;
-    if (path === this.collabBoundFile) return;
+    if (this.recentDiskWrites.has(path)) {
+      debugLog("bg-sync", `handleLocalTextModify: ${path} skip (recentDiskWrite)`);
+      return;
+    }
+    if (path === this.collabBoundFile) {
+      debugLog("bg-sync", `handleLocalTextModify: ${path} skip (collabBoundFile)`);
+      return;
+    }
 
     const docHandle = this.syncManager.getDoc(path);
     if (!docHandle) return;
@@ -254,7 +273,11 @@ export class BackgroundSync {
     if (!file) return;
 
     const localContent = normalizeLineEndings(await this.vault.read(file));
-    if (localContent === docHandle.text.toString()) return;
+    if (localContent === docHandle.text.toString()) {
+      debugLog("bg-sync", `handleLocalTextModify: ${path} skip (content unchanged)`);
+      return;
+    }
+    debugLog("bg-sync", `handleLocalTextModify: ${path} applying update`);
 
     applyMinimalYTextUpdate(docHandle.doc, docHandle.text, localContent);
 
@@ -285,6 +308,7 @@ export class BackgroundSync {
   }
 
   private attachObserver(path: string, text: Y.Text): void {
+    debugLog("bg-sync", `attachObserver: ${path}`);
     const observer = (_event: Y.YTextEvent, transaction: Y.Transaction) => {
       if (transaction.local) return;
       if (path === this.collabBoundFile) return;
@@ -306,6 +330,7 @@ export class BackgroundSync {
   }
 
   private scheduleDiskWrite(path: string, text: Y.Text): void {
+    debugLog("bg-sync", `scheduleDiskWrite: ${path}`);
     const existing = this.writeTimers.get(path);
     if (existing) clearTimeout(existing);
     this.writeTimers.set(
@@ -318,6 +343,7 @@ export class BackgroundSync {
   }
 
   private writeToDisk(path: string, content: string): Promise<void> {
+    debugLog("bg-sync", `writeToDisk: ${path} contentLen=${content.length}`);
     if (this.lastWrittenContent.get(path) === content) return Promise.resolve();
     this.writeQueue = this.writeQueue.then(() => this.doWriteToDisk(path, content));
     return this.writeQueue;

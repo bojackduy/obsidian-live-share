@@ -14,6 +14,7 @@ import {
   toLocalPath,
 } from "../utils";
 import type { ExclusionManager } from "./exclusion";
+import { debugLog } from "../debug-logger";
 
 export interface FileEntry {
   hash: string;
@@ -56,17 +57,20 @@ export class ManifestManager {
   }
 
   async connect(syncManager: SyncManager): Promise<void> {
+    debugLog("manifest", "connect: sync start");
     this.syncManager = syncManager;
     this.docHandle = syncManager.getDoc("__manifest__");
     if (!this.docHandle) return;
     this.manifest = this.docHandle.doc.getMap("files");
     await syncManager.waitForSync("__manifest__");
+    debugLog("manifest", "connect: sync end");
   }
 
   async publishManifest(options?: { purge?: boolean }): Promise<void> {
     if (!this.manifest || !this.docHandle) return;
 
     const files = this.getSharedFiles();
+    debugLog("manifest", `publishManifest: ${files.length} files`);
 
     const entries = new Map<string, FileEntry>();
     for (const file of files) {
@@ -135,9 +139,15 @@ export class ManifestManager {
     const entries = Array.from(this.manifest.entries());
 
     for (const [path, entry] of entries) {
-      if (!path || path.startsWith("/") || path.startsWith("\\")) continue;
+      if (!path || path.startsWith("/") || path.startsWith("\\")) {
+        debugLog("manifest", `syncFromManifest: ${path} skip (invalid path)`);
+        continue;
+      }
       const segments = path.split(/[\\/]/);
-      if (segments.some((segment) => segment === ".." || segment === ".")) continue;
+      if (segments.some((segment) => segment === ".." || segment === ".")) {
+        debugLog("manifest", `syncFromManifest: ${path} skip (path traversal)`);
+        continue;
+      }
 
       const diskPath = toLocalPath(path);
       if (entry.directory) {
@@ -153,7 +163,10 @@ export class ManifestManager {
         continue;
       }
 
-      if (options?.skipText && !entry.binary && isTextFile(path)) continue;
+      if (options?.skipText && !entry.binary && isTextFile(path)) {
+        debugLog("manifest", `syncFromManifest: ${path} skip (skipText option)`);
+        continue;
+      }
 
       const localFile = getFileByPath(this.vault, diskPath);
 
@@ -172,14 +185,19 @@ export class ManifestManager {
         }
       }
 
-      if (!needsSync) continue;
+      if (!needsSync) {
+        debugLog("manifest", `syncFromManifest: ${path} skip (hash match)`);
+        continue;
+      }
 
       if (entry.binary) {
+        debugLog("manifest", `syncFromManifest: ${path} requesting binary`);
         requestBinary?.(path);
         synced++;
         continue;
       }
 
+      debugLog("manifest", `syncFromManifest: syncing ${path}`);
       const tempHandle = this.syncManager.getDoc(path);
       if (!tempHandle) continue;
 
@@ -231,6 +249,7 @@ export class ManifestManager {
         else if (change.action === "update") updated.push(key);
       });
       if (added.length > 0 || removed.length > 0 || updated.length > 0) {
+        debugLog("manifest", `manifestChange: +${added.length} -${removed.length} ~${updated.length}`);
         callback(added, removed, updated);
       }
     };
@@ -249,16 +268,20 @@ export class ManifestManager {
       }
     }
     if (content instanceof ArrayBuffer) {
+      const hash = await hashBuffer(content);
+      debugLog("manifest", `updateFile: ${canonical} hash=${hash} binary`);
       this.manifest.set(canonical, {
-        hash: await hashBuffer(content),
+        hash,
         size: content.byteLength,
         mtime: file.stat.mtime,
         binary: true,
       });
     } else {
       const normalized = normalizeLineEndings(content);
+      const hash = await hashContent(normalized);
+      debugLog("manifest", `updateFile: ${canonical} hash=${hash}`);
       this.manifest.set(canonical, {
-        hash: await hashContent(normalized),
+        hash,
         size: normalized.length,
         mtime: file.stat.mtime,
       });
@@ -267,7 +290,9 @@ export class ManifestManager {
 
   removeFile(path: string): void {
     if (!this.manifest) return;
-    this.manifest.delete(toCanonicalPath(normalizePath(path)));
+    const canonical = toCanonicalPath(normalizePath(path));
+    debugLog("manifest", `removeFile: ${canonical}`);
+    this.manifest.delete(canonical);
   }
 
   addFolder(rawPath: string): void {
@@ -281,6 +306,7 @@ export class ManifestManager {
     if (!this.manifest || !this.docHandle) return;
     const normOld = toCanonicalPath(normalizePath(oldPath));
     const normNew = toCanonicalPath(normalizePath(newPath));
+    debugLog("manifest", `renameFile: ${normOld} -> ${normNew}`);
     const fileEntry = this.manifest.get(normOld);
     if (fileEntry) {
       this.docHandle.doc.transact(() => {

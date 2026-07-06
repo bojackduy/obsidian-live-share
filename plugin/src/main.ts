@@ -2,7 +2,7 @@ import type { EditorView } from "@codemirror/view";
 import { MarkdownView, Menu, Notice, Plugin, TFile, requestUrl } from "obsidian";
 
 import { minimatch } from "minimatch";
-import { DebugLogger } from "./debug-logger";
+import { DebugLogger, setDebugLogger } from "./debug-logger";
 import { CollabManager } from "./editor/collab";
 import { BackgroundSync } from "./files/background-sync";
 import { CanvasSync } from "./files/canvas-sync";
@@ -238,6 +238,7 @@ export default class LiveSharePlugin extends Plugin {
       this.settings.debugLogPath,
       this.settings.debugLogging,
     );
+    setDebugLogger(this.logger);
     this.connectionStateUnsub = this.connectionState.onChange(() => this.updateStatusBar());
 
     this.registerEditorExtension(this.collabManager.getBaseExtension());

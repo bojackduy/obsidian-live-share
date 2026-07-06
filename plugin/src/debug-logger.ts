@@ -14,6 +14,30 @@ function stringifyError(err: unknown): string {
   }
 }
 
+let _instance: DebugLogger | null = null;
+
+export function setDebugLogger(instance: DebugLogger | null) {
+  _instance = instance;
+}
+
+export function debugLog(
+  category: string,
+  message: string,
+  ...args: unknown[]
+): void {
+  _instance?.log(category, args.length > 0 ? `${message} ${args.map((a) => {
+    try { return JSON.stringify(a); } catch { return String(a); }
+  }).join(" ")}` : message);
+}
+
+export function debugError(
+  category: string,
+  message: string,
+  err?: unknown,
+): void {
+  _instance?.error(category, message, err);
+}
+
 export class DebugLogger {
   private buffer: string[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;

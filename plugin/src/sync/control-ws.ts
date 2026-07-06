@@ -6,6 +6,7 @@ import type {
 } from "../types";
 import { toWsUrl } from "../utils";
 import type { E2ECrypto } from "./crypto";
+import { debugLog } from "../debug-logger";
 
 export type { ControlMessage, ControlMessageType };
 
@@ -46,10 +47,12 @@ export class ControlChannel {
     callback: (state: "connected" | "reconnecting" | "disconnected" | "auth-required") => void,
   ) {
     this.stateChangeCallback = callback;
+    debugLog("control-ws", "onStateChange callback registered");
   }
 
   onError(callback: (context: string, err: unknown) => void) {
     this.errorCallback = callback;
+    debugLog("control-ws", "onError callback registered");
   }
 
   getLatency(): number {
@@ -61,6 +64,7 @@ export class ControlChannel {
     this.shouldConnect = true;
     this.reconnectAttempts = 0;
     this.everConnected = false;
+    debugLog("control-ws", "connect called");
     this.openWebSocket();
   }
 
@@ -72,9 +76,11 @@ export class ControlChannel {
     if (this.settings.serverPassword)
       url += `&password=${encodeURIComponent(this.settings.serverPassword)}`;
 
+    debugLog("control-ws", `openWebSocket connecting to ${wsUrl}/control/${encodeURIComponent(this.settings.roomId)}`, { hasToken: !!this.settings.token, hasJwt: !!this.settings.jwt, hasPassword: !!this.settings.serverPassword });
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
+      debugLog("control-ws", "WebSocket opened");
       this.reconnectAttempts = 0;
       this.everConnected = true;
       this.stateChangeCallback?.("connected");
@@ -83,9 +89,9 @@ export class ControlChannel {
 
     this.ws.onmessage = (event) => {
       try {
-        const msg = JSON.parse(
-          typeof event.data === "string" ? event.data : "",
-        ) as ControlMessage & { encrypted?: boolean };
+        const raw = typeof event.data === "string" ? event.data : "";
+        const msg = JSON.parse(raw) as ControlMessage & { encrypted?: boolean };
+        debugLog("control-ws", `onmessage type=${msg.type} length=${raw.length}`);
 
         if (msg.type === "pong") {
           if (this.lastPingTime > 0) {
@@ -108,28 +114,36 @@ export class ControlChannel {
     };
 
     this.ws.onclose = () => {
+      debugLog("control-ws", "WebSocket closed");
       this.stopPing();
       this.ws = null;
       if (this.isDestroyed) return;
       if (this.shouldConnect) {
+        debugLog("control-ws", "stateChangeCallback reconnecting");
         this.stateChangeCallback?.("reconnecting");
         this.scheduleReconnect();
       } else {
-        this.stateChangeCallback?.(this.everConnected ? "disconnected" : "auth-required");
+        const state = this.everConnected ? "disconnected" : "auth-required";
+        debugLog("control-ws", `stateChangeCallback ${state}`);
+        this.stateChangeCallback?.(state);
       }
     };
 
-    this.ws.onerror = () => {};
+    this.ws.onerror = () => {
+      debugLog("control-ws", "WebSocket error");
+    };
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      debugLog("control-ws", "max reconnect attempts reached, giving up");
       this.shouldConnect = false;
       this.stateChangeCallback?.(this.everConnected ? "disconnected" : "auth-required");
       return;
     }
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts++;
+    debugLog("control-ws", `scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.shouldConnect) this.openWebSocket();
@@ -137,7 +151,11 @@ export class ControlChannel {
   }
 
   send(msg: ControlMessage): void {
-    if (this.ws?.readyState !== WebSocket.OPEN) return;
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      debugLog("control-ws", `send skipped (ws not open) type=${msg.type}`);
+      return;
+    }
+    debugLog("control-ws", `send type=${msg.type}`);
     const encryptable =
       msg.type === "file-op" ||
       msg.type === "file-chunk-start" ||
@@ -169,6 +187,7 @@ export class ControlChannel {
   }
 
   destroy(): void {
+    debugLog("control-ws", "destroy called");
     this.isDestroyed = true;
     this.shouldConnect = false;
     if (this.reconnectTimer) {

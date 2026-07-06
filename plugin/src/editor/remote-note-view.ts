@@ -2,6 +2,7 @@ import { EditorState, type Extension, Transaction } from "@codemirror/state";
 import { EditorView, highlightActiveLine, lineNumbers } from "@codemirror/view";
 import { ItemView } from "obsidian";
 
+import { debugLog } from "../debug-logger";
 import type LiveSharePlugin from "../main";
 import type { TextPatchMessage } from "../types";
 
@@ -47,6 +48,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
+    debugLog("remote-note", `onOpen: path=${this.path}`);
     const container = this.contentEl.createDiv({ cls: "live-share-remote-editor" });
     container.style.height = "100%";
     container.style.overflow = "auto";
@@ -77,6 +79,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    debugLog("remote-note", "onClose");
     this.editor?.destroy();
     this.editor = null;
   }
@@ -86,6 +89,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   async setState(state: Record<string, unknown>): Promise<void> {
+    debugLog("remote-note", `setState: path=${state.path}`);
     this.path = (state.path as string) ?? "";
     this.seq = 0;
     this.pendingSnapshot = false;
@@ -98,6 +102,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   setContent(path: string, seq: number, lines: string[]): void {
+    debugLog("remote-note", `setContent: path=${path}, seq=${seq}, lines=${lines.length}`);
     if (path !== this.path) return;
     this.seq = seq;
     this.pendingSnapshot = false;
@@ -111,6 +116,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   applyPatch(msg: TextPatchMessage): void {
+    debugLog("remote-note", `applyPatch: path=${msg.path}, seq=${msg.seq}, lnum=${msg.lnum}, count=${msg.count}, lines=${msg.lines.length}`);
     if (msg.path !== this.path || !this.editor) return;
 
     if (msg.seq !== undefined && msg.seq !== this.seq + 1) {
@@ -137,6 +143,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   private onDocChanged(update: import("@codemirror/view").ViewUpdate): void {
+    debugLog("remote-note", "onDocChanged: local change detected");
     if (update.transactions.some((tr) => tr.annotation(Transaction.remote))) return;
 
     for (const tr of update.transactions) {
@@ -158,6 +165,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   private sendPatch(lnum: number, count: number, lines: string[]): void {
+    debugLog("remote-note", `sendPatch: lnum=${lnum}, count=${count}, lines=${lines.length}`);
     const userId = pluginInstance?.settings.githubUserId || pluginInstance?.settings.clientId || "";
     pluginInstance?.controlChannel?.send({
       type: "text-patch",
@@ -170,6 +178,7 @@ export class RemoteNoteView extends ItemView {
   }
 
   private requestSnapshot(): void {
+    debugLog("remote-note", `requestSnapshot: path=${this.path}`);
     if (this.pendingSnapshot) return;
     this.pendingSnapshot = true;
     pluginInstance?.controlChannel?.send({

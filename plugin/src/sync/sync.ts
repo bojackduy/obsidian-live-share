@@ -7,6 +7,7 @@ import * as Y from "yjs";
 import type { LiveShareSettings } from "../types";
 import { normalizePath, toWsUrl } from "../utils";
 import type { E2ECrypto } from "./crypto";
+import { debugLog } from "../debug-logger";
 import {
   MUX_AWARENESS,
   MUX_AWARENESS_ENCRYPTED,
@@ -103,13 +104,17 @@ export class SyncManager {
   }
 
   getDoc(rawPath: string): DocHandle | null {
-    if ((!this.isConnected && !this.shouldConnect) || !this.settings.roomId) return null;
+    if ((!this.isConnected && !this.shouldConnect) || !this.settings.roomId) {
+      debugLog("sync", `getDoc ${rawPath} blocked - not connected`);
+      return null;
+    }
 
     const filePath = normalizePath(rawPath);
 
     const existingDoc = this.docs.get(filePath);
     const existingAwareness = this.awarenessMap.get(filePath);
     if (existingDoc && existingAwareness) {
+      debugLog("sync", `getDoc ${filePath} returning existing doc id=${existingDoc.clientID}`);
       return {
         doc: existingDoc,
         text: existingDoc.getText("content"),
@@ -117,6 +122,7 @@ export class SyncManager {
       };
     }
 
+    debugLog("sync", `getDoc ${filePath} creating new Y.Doc`);
     const doc = new Y.Doc();
     this.docs.set(filePath, doc);
 
@@ -127,6 +133,7 @@ export class SyncManager {
 
     const updateHandler = (update: Uint8Array, origin: unknown) => {
       if (origin === this) return;
+      debugLog("sync", `doc update ${filePath} updateLen=${update.length} origin=${typeof origin === "string" ? origin : "object"}`);
       const syncEncoder = encoding.createEncoder();
       syncProtocol.writeUpdate(syncEncoder, update);
       this.sendMux(filePath, MUX_SYNC, encoding.toUint8Array(syncEncoder));
@@ -141,6 +148,7 @@ export class SyncManager {
       if (origin === "remote") return;
       const changedClients = changes.added.concat(changes.updated, changes.removed);
       if (changedClients.length === 0) return;
+      debugLog("sync", `awareness update ${filePath} changed=${changedClients.join(",")} origin=${origin === "remote" ? "remote" : "local"}`);
       const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
       this.sendMux(filePath, MUX_AWARENESS, awarenessUpdate);
     };
@@ -152,11 +160,13 @@ export class SyncManager {
     }
 
     const text = doc.getText("content");
+    debugLog("sync", `getDoc ${filePath} created doc id=${doc.clientID}`);
     return { doc, text, awareness };
   }
 
   releaseDoc(rawPath: string): void {
     const filePath = normalizePath(rawPath);
+    debugLog("sync", `releaseDoc ${filePath}`);
 
     this.sendUnsubscribe(filePath);
 
@@ -216,8 +226,14 @@ export class SyncManager {
   }
 
   private openWebSocket(): void {
-    if (this.isDestroyed) return;
-    if (!this.settings.roomId || !this.settings.serverUrl) return;
+    if (this.isDestroyed) {
+      debugLog("sync", "openWebSocket blocked - destroyed");
+      return;
+    }
+    if (!this.settings.roomId || !this.settings.serverUrl) {
+      debugLog("sync", "openWebSocket blocked - no roomId or serverUrl");
+      return;
+    }
 
     const wsUrl = toWsUrl(this.settings.serverUrl);
     const params = new URLSearchParams({ token: this.settings.token });
@@ -227,11 +243,13 @@ export class SyncManager {
     if (userId) params.set("userId", userId);
 
     const url = `${wsUrl}/ws-mux/${encodeURIComponent(this.settings.roomId)}?${params.toString()}`;
+    debugLog("sync", `openWebSocket connecting to ${wsUrl}/ws-mux/${this.settings.roomId}`);
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
     ws.onopen = () => {
+      debugLog("sync", "mux WS connected");
       this.isConnected = true;
       this.reconnectAttempts = 0;
       for (const filePath of this.docs.keys()) {
@@ -246,7 +264,8 @@ export class SyncManager {
       this.handleMessage(data);
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event: { code?: number; reason?: string } | null) => {
+      debugLog("sync", `mux WS closed code=${event?.code} reason=${event?.reason}`);
       this.ws = null;
       this.isConnected = false;
       this.onConnectionChangeCallback?.(false);
@@ -258,7 +277,8 @@ export class SyncManager {
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (event) => {
+      debugLog("sync", "mux WS error");
       ws.close();
     };
   }
@@ -283,6 +303,9 @@ export class SyncManager {
 
   private handleMessage(data: Uint8Array): void {
     const { docId, msgType, payload } = decodeMuxMessage(data);
+    const types = ["SYNC", "AWARENESS", "SUBSCRIBE", "SUBSCRIBED", "UNSUBSCRIBE", "SYNC_REQUEST", "", "SYNC_ENCRYPTED", "AWARENESS_ENCRYPTED"];
+    const typeName = types[msgType] ?? `UNKNOWN(${msgType})`;
+    debugLog("sync", `recv ${docId} ${typeName} payloadLen=${payload?.length ?? 0}`);
 
     switch (msgType) {
       case MUX_SUBSCRIBED:
@@ -308,17 +331,21 @@ export class SyncManager {
 
   private handleSubscribed(docId: string, payload: Uint8Array): void {
     const doc = this.docs.get(docId);
-    if (!doc) return;
-
-    const syncEncoder = encoding.createEncoder();
-    syncProtocol.writeSyncStep1(syncEncoder, doc);
-    this.sendMux(docId, MUX_SYNC, encoding.toUint8Array(syncEncoder));
+    if (!doc) {
+      debugLog("sync", `handleSubscribed ${docId} - doc not found`);
+      return;
+    }
 
     let peerCount = 0;
     if (payload.length > 0) {
       const decoder = decoding.createDecoder(payload);
       peerCount = decoding.readVarUint(decoder);
     }
+    debugLog("sync", `handleSubscribed ${docId} peerCount=${peerCount}`);
+
+    const syncEncoder = encoding.createEncoder();
+    syncProtocol.writeSyncStep1(syncEncoder, doc);
+    this.sendMux(docId, MUX_SYNC, encoding.toUint8Array(syncEncoder));
 
     if (peerCount === 0) {
       this.setSynced(docId, true);
@@ -327,7 +354,11 @@ export class SyncManager {
 
   private handleSyncRequest(docId: string): void {
     const doc = this.docs.get(docId);
-    if (!doc) return;
+    if (!doc) {
+      debugLog("sync", `handleSyncRequest ${docId} - doc not found`);
+      return;
+    }
+    debugLog("sync", `handleSyncRequest ${docId}`);
 
     const syncEncoder = encoding.createEncoder();
     syncProtocol.writeSyncStep1(syncEncoder, doc);
@@ -336,26 +367,39 @@ export class SyncManager {
 
   private handleSync(docId: string, payload: Uint8Array): void {
     const doc = this.docs.get(docId);
-    if (!doc) return;
+    if (!doc) {
+      debugLog("sync", `handleSync ${docId} - doc not found`);
+      return;
+    }
 
     const decoder = decoding.createDecoder(payload);
     const syncEncoder = encoding.createEncoder();
     const msgType = decoding.peekVarUint(decoder);
+    const syncTypes = ["STEP1", "STEP2", "UPDATE"];
+    const syncName = syncTypes[msgType] ?? `UNKNOWN(${msgType})`;
+    debugLog("sync", `handleSync ${docId} ${syncName} payloadLen=${payload.length}`);
 
     syncProtocol.readSyncMessage(decoder, syncEncoder, doc, this);
 
-    if (encoding.length(syncEncoder) > 0) {
+    const respLen = encoding.length(syncEncoder);
+    if (respLen > 0) {
+      debugLog("sync", `handleSync ${docId} responding with ${respLen} bytes`);
       this.sendMux(docId, MUX_SYNC, encoding.toUint8Array(syncEncoder));
     }
 
     if (msgType === SYNC_STEP2) {
+      debugLog("sync", `handleSync ${docId} SYNC_STEP2 - marking synced`);
       this.setSynced(docId, true);
     }
   }
 
   private handleAwareness(docId: string, payload: Uint8Array): void {
     const awareness = this.awarenessMap.get(docId);
-    if (!awareness) return;
+    if (!awareness) {
+      debugLog("sync", `handleAwareness ${docId} - awareness not found`);
+      return;
+    }
+    debugLog("sync", `handleAwareness ${docId} payloadLen=${payload.length}`);
     awarenessProtocol.applyAwarenessUpdate(awareness, payload, "remote");
   }
 
@@ -407,9 +451,15 @@ export class SyncManager {
   }
 
   private sendMux(docId: string, msgType: number, payload?: Uint8Array): void {
+    const types = ["SYNC", "AWARENESS", "SUBSCRIBE", "SUBSCRIBED", "UNSUBSCRIBE", "SYNC_REQUEST", "", "SYNC_ENCRYPTED", "AWARENESS_ENCRYPTED"];
+    const typeName = types[msgType] ?? `UNKNOWN(${msgType})`;
+    debugLog("sync", `send ${docId} ${typeName} payloadLen=${payload?.length ?? 0}`);
+
     if (!this.e2e?.enabled || !payload || payload.length === 0) {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(encodeMuxMessage(docId, msgType, payload));
+      } else {
+        debugLog("sync", `send ${docId} ${typeName} skipped - WS not open`);
       }
       return;
     }
@@ -421,6 +471,8 @@ export class SyncManager {
     } else {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(encodeMuxMessage(docId, msgType, payload));
+      } else {
+        debugLog("sync", `send ${docId} ${typeName} skipped - WS not open`);
       }
     }
   }

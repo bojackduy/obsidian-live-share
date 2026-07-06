@@ -1,3 +1,4 @@
+import { debugLog } from "../debug-logger";
 import type { ControlChannel } from "../sync/control-ws";
 import { normalizePath, toCanonicalPath } from "../utils";
 import type { PresenceUser } from "./presence-view";
@@ -46,6 +47,7 @@ export class PresenceManager {
     this.broadcastPresence();
     if (this.presenceInterval) clearInterval(this.presenceInterval);
     this.presenceInterval = setInterval(() => this.broadcastPresence(), 3_000);
+    debugLog("presence", "Started presence broadcasting (interval: 3s)");
   }
 
   debouncedBroadcastPresence(): void {
@@ -59,6 +61,7 @@ export class PresenceManager {
   broadcastPresence(): void {
     const cc = this.ctx.getControlChannel();
     if (!cc) return;
+    debugLog("presence", `Broadcasting presence: file=${toCanonicalPath(normalizePath(this.ctx.getCurrentFile()))}, line=${this.ctx.getCursorLine()}, scroll=${this.ctx.getScrollTop()}`);
     cc.send({
       type: "presence-update",
       userId: this.ctx.getUserId(),
@@ -78,6 +81,7 @@ export class PresenceManager {
       return;
     }
     this.followTarget = userId;
+    debugLog("presence", `Following user: ${userId}`);
     const user = this.ctx.getRemoteUsers().get(userId);
     this.ctx.notify(`Live Share: following ${user?.displayName ?? userId}`);
 
@@ -96,6 +100,7 @@ export class PresenceManager {
 
   unfollowUser(): void {
     if (!this.followTarget) return;
+    debugLog("presence", `Stopped following user: ${this.followTarget}`);
     this.followTarget = null;
     this.clearUnfollowListeners();
     this.ctx.notify("Live Share: stopped following");
@@ -151,6 +156,7 @@ export class PresenceManager {
 
   togglePresent(): void {
     this.isPresenting = !this.isPresenting;
+    debugLog("presence", `Toggled present: ${this.isPresenting}`);
     const cc = this.ctx.getControlChannel();
     if (this.isPresenting) {
       cc?.send({ type: "present-start", userId: this.ctx.getUserId() });
