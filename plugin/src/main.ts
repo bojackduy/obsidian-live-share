@@ -33,6 +33,8 @@ import { DEFAULT_SETTINGS, type LiveShareSettings } from "./types";
 
 import { AuditLogModal } from "./ui/audit-modal";
 
+import { hashContent } from "./files/manifest";
+
 import { ExplorerIndicators } from "./ui/explorer-indicators";
 import { ConfirmModal, PromptModal } from "./ui/modals";
 import { LiveShareSettingTab } from "./ui/settings";
@@ -87,6 +89,7 @@ export default class LiveSharePlugin extends Plugin {
   muxConnected = false;
   controlConnected = false;
   private manifestHandlerQueue: Promise<void> = Promise.resolve();
+  private guestInventorySent = false;
 
   updateOnlineState() {
     const bothUp = this.muxConnected && this.controlConnected;
@@ -99,6 +102,30 @@ export default class LiveSharePlugin extends Plugin {
 
   private mutePathEvents = (path: string) => this.fileOpsManager.mutePathEvents(path);
   private unmutePathEvents = (path: string) => this.fileOpsManager.unmutePathEvents(path);
+
+  private async sendGuestInventory() {
+    if (this.settings.role !== "guest") return;
+    const textFiles = this.app.vault.getFiles().filter(
+      (f) => isTextFile(f.path) && this.manifestManager.isSharedPath(f.path),
+    );
+    const entries: { path: string; hash: string; size: number; binary: boolean }[] = [];
+    for (const file of textFiles) {
+      try {
+        const content = await this.app.vault.read(file);
+        entries.push({
+          path: toCanonicalPath(normalizePath(file.path)),
+          hash: await hashContent(content),
+          size: content.length,
+          binary: false,
+        });
+      } catch {
+        // Skip files that can't be read
+      }
+    }
+    if (entries.length === 0) return;
+    this.logger.log("main", `sending guest inventory: ${entries.length} files`);
+    this.controlChannel?.send({ type: "guest-inventory", files: entries });
+  }
 
   private registerManifestChangeHandler() {
     this.manifestManager.setManifestChangeHandler((added, removed, updated) => {
@@ -664,6 +691,9 @@ export default class LiveSharePlugin extends Plugin {
         if (this.settings.role === "host") {
           this.controlConnected = true;
           this.updateOnlineState();
+        } else if (this.settings.role === "guest" && !this.guestInventorySent) {
+          this.guestInventorySent = true;
+          void this.sendGuestInventory();
         }
         this.presenceManager?.broadcastPresence();
         if (this.backgroundSync.isRunning()) {
@@ -681,6 +711,7 @@ export default class LiveSharePlugin extends Plugin {
         void this.endSession();
       } else {
         this.controlConnected = false;
+        this.guestInventorySent = false;
         this.updateOnlineState();
         this.connectionState.transition({ type: "disconnect" });
         if (this.sessionManager.isActive && !this.isEndingSession) {

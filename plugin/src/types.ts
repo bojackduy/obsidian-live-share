@@ -332,6 +332,30 @@ export interface TextSnapshotResponseMessage {
   lines: string[];
 }
 
+export interface GuestInventoryEntry {
+  path: string;
+  hash: string;
+  size: number;
+  binary: boolean;
+}
+
+export interface GuestInventoryMessage {
+  type: "guest-inventory";
+  files: GuestInventoryEntry[];
+}
+
+export interface GuestFileRequestMessage {
+  type: "guest-file-request";
+  paths: string[];
+}
+
+export interface GuestFileContentMessage {
+  type: "guest-file-content";
+  path: string;
+  content: string;
+  binary: boolean;
+}
+
 export type ControlMessage =
   | FileOpMessage
   | ChunkStartMessage
@@ -364,7 +388,10 @@ export type ControlMessage =
   | WorkspaceResponseMessage
   | TextPatchMessage
   | TextSnapshotRequestMessage
-  | TextSnapshotResponseMessage;
+  | TextSnapshotResponseMessage
+  | GuestInventoryMessage
+  | GuestFileRequestMessage
+  | GuestFileContentMessage;
 
 export type ControlMessageType = ControlMessage["type"];
 
@@ -401,4 +428,7 @@ export interface ControlMessageMap {
   "text-patch": TextPatchMessage;
   "text-snapshot-request": TextSnapshotRequestMessage;
   "text-snapshot-response": TextSnapshotResponseMessage;
+  "guest-inventory": GuestInventoryMessage;
+  "guest-file-request": GuestFileRequestMessage;
+  "guest-file-content": GuestFileContentMessage;
 }

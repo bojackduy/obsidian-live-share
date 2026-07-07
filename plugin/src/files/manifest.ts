@@ -24,14 +24,14 @@ export interface FileEntry {
   directory?: boolean;
 }
 
-async function hashBuffer(buf: ArrayBuffer): Promise<string> {
+export async function hashBuffer(buf: ArrayBuffer): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", buf);
   return Array.from(new Uint8Array(hash))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
 
-function hashContent(content: string): Promise<string> {
+export function hashContent(content: string): Promise<string> {
   return hashBuffer(new TextEncoder().encode(content).buffer);
 }
 

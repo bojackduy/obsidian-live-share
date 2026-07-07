@@ -3,12 +3,14 @@ import { MarkdownView, Notice, TFile, TFolder } from "obsidian";
 
 import { debugLog } from "../debug-logger";
 
+import { hashContent } from "../files/manifest";
+
 import type LiveSharePlugin from "../main";
 import type { ControlMessage, FileOp } from "../types";
 import { ApprovalModal } from "../ui/approval-modal";
 import { showFocusNotification } from "../ui/focus-notification";
 import { ConfirmModal } from "../ui/modals";
-import { isTextFile, normalizePath, toCanonicalPath, toLocalPath } from "../utils";
+import { ensureFolder, isTextFile, normalizePath, toCanonicalPath, toLocalPath, VAULT_EVENT_SETTLE_MS } from "../utils";
 
 const CHUNK_TO_CONTROL = {
   "chunk-start": "file-chunk-start",
@@ -407,5 +409,80 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
     debugLog("ctrl-handler", `text-snapshot-response path=${msg.path} seq=${msg.seq} lines=${msg.lines?.length}`);
     if (plugin.settings.role !== "guest") return;
     plugin.setRemoteNoteContent(msg.path, msg.seq, msg.lines);
+  });
+
+  // Guest sends inventory of local files; host imports missing ones
+  channel.on("guest-inventory", async (msg) => {
+    debugLog("ctrl-handler", `guest-inventory: ${msg.files.length} files`);
+    if (plugin.settings.role !== "host") return;
+
+    const wanted: string[] = [];
+    for (const entry of msg.files) {
+      if (entry.binary) continue;
+      const localFile = plugin.app.vault.getAbstractFileByPath(toLocalPath(entry.path));
+      if (!localFile) {
+        wanted.push(entry.path);
+      }
+    }
+
+    if (wanted.length > 0) {
+      debugLog("ctrl-handler", `guest-inventory: requesting ${wanted.length} files`);
+      plugin.controlChannel?.send({ type: "guest-file-request", paths: wanted });
+    }
+  });
+
+  // Host asks guest for specific file content
+  channel.on("guest-file-request", async (msg) => {
+    debugLog("ctrl-handler", `guest-file-request: ${msg.paths.length} paths`);
+    if (plugin.settings.role !== "guest") return;
+
+    for (const path of msg.paths) {
+      const localPath = toLocalPath(path);
+      const file = plugin.app.vault.getAbstractFileByPath(localPath);
+      if (!(file instanceof TFile)) continue;
+
+      try {
+        const content = await plugin.app.vault.read(file);
+        plugin.controlChannel?.send({
+          type: "guest-file-content",
+          path,
+          content,
+          binary: false,
+        });
+      } catch (err) {
+        debugLog("ctrl-handler", `guest-file-request: failed to read ${path}`);
+      }
+    }
+  });
+
+  // Host receives file content from guest and writes it locally
+  channel.on("guest-file-content", async (msg) => {
+    debugLog("ctrl-handler", `guest-file-content: ${msg.path}`);
+    if (plugin.settings.role !== "host") return;
+
+    const localPath = toLocalPath(msg.path);
+    const existing = plugin.app.vault.getAbstractFileByPath(localPath);
+    if (existing) return;
+
+    const parentDir = localPath.substring(0, localPath.lastIndexOf("/"));
+    if (parentDir) {
+      await ensureFolder(plugin.app.vault, parentDir);
+    }
+
+    plugin.fileOpsManager.mutePathEvents(localPath);
+    try {
+      const file = await plugin.app.vault.create(localPath, msg.content);
+      if (isTextFile(msg.path)) {
+        await plugin.backgroundSync.onFileAdded(msg.path);
+      }
+      await plugin.manifestManager.updateFile(file, msg.content);
+    } finally {
+      setTimeout(() => {
+        plugin.fileOpsManager.unmutePathEvents(localPath);
+      }, VAULT_EVENT_SETTLE_MS);
+    }
+
+    await plugin.manifestManager.publishManifest({ purge: false });
+    debugLog("ctrl-handler", `guest-file-content: imported ${msg.path}`);
   });
 }
