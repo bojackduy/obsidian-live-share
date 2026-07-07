@@ -154,4 +154,15 @@ export class CollabManager {
     this.currentView = null;
     view.dispatch({ effects: this.compartment.reconfigure([]) });
   }
+
+  clearAwareness(): void {
+    debugLog("collab", "clearAwareness");
+    this.activationGen++;
+    if (this.currentAwareness) {
+      this.currentAwareness.setLocalState(null);
+      this.currentAwareness = null;
+    }
+    this.currentPath = null;
+    this.currentView = null;
+  }
 }

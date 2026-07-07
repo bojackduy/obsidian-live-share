@@ -729,7 +729,7 @@ export default class LiveSharePlugin extends Plugin {
             const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
             if (currentView?.file?.path !== toLocalPath(filePath)) {
               await this.app.workspace.getLeaf().openFile(localFile);
-              this.onActiveFileChange();
+              // onActiveFileChange handled by active-leaf-change event
             }
           } else {
             const existing = this.findRemoteNoteLeaf(filePath);
@@ -738,6 +738,8 @@ export default class LiveSharePlugin extends Plugin {
             } else {
               await this.openRemoteFile(filePath);
             }
+            // RemoteNoteView doesn't use yCollab — clear stale awareness
+            this.collabManager.clearAwareness();
           }
         } else {
           const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -745,7 +747,7 @@ export default class LiveSharePlugin extends Plugin {
             const file = this.app.vault.getAbstractFileByPath(toLocalPath(filePath));
             if (file instanceof TFile) {
               await this.app.workspace.getLeaf().openFile(file);
-              this.onActiveFileChange();
+              // onActiveFileChange handled by active-leaf-change event
             }
           }
         }

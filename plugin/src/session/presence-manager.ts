@@ -27,6 +27,7 @@ export class PresenceManager {
   private followTarget: string | null = null;
   private followSuppressUnfollow = false;
   private isApplyingFollow = false;
+  private pendingFollow: PresenceUser | null = null;
   private unfollowListeners: (() => void)[] = [];
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
   private presenceInterval: ReturnType<typeof setInterval> | null = null;
@@ -102,6 +103,7 @@ export class PresenceManager {
     if (!this.followTarget) return;
     debugLog("presence", `Stopped following user: ${this.followTarget}`);
     this.followTarget = null;
+    this.pendingFollow = null;
     this.clearUnfollowListeners();
     this.ctx.notify("Live Share: stopped following");
   }
@@ -112,7 +114,11 @@ export class PresenceManager {
   }
 
   async applyFollowState(user: PresenceUser): Promise<void> {
-    if (!user.currentFile || this.isApplyingFollow) return;
+    if (!user.currentFile) return;
+    if (this.isApplyingFollow) {
+      this.pendingFollow = user;
+      return;
+    }
 
     this.isApplyingFollow = true;
     this.followSuppressUnfollow = true;
@@ -122,6 +128,11 @@ export class PresenceManager {
     } finally {
       this.followSuppressUnfollow = false;
       this.isApplyingFollow = false;
+      if (this.pendingFollow) {
+        const next = this.pendingFollow;
+        this.pendingFollow = null;
+        void this.applyFollowState(next);
+      }
     }
   }
 
