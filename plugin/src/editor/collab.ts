@@ -39,34 +39,25 @@ export class CollabManager {
     const gen = ++this.activationGen;
     debugLog("collab", `activateForFile start path=${filePath} role=${role} permission=${permission} gen=${gen}`);
 
-    if (filePath !== this.currentPath || view !== this.currentView) {
-      debugLog("collab", `switching file from ${this.currentPath} to ${filePath}`);
-      if (this.currentAwareness) {
-        this.currentAwareness.setLocalState(null);
-      }
-      if (this.currentView && this.currentView !== view) {
-        try {
-          this.currentView.dispatch({
-            effects: this.compartment.reconfigure([]),
-          });
-        } catch {
-          // Previous view may have been destroyed
-        }
-      }
-      this.currentAwareness = null;
-    }
+    const oldAwareness = this.currentAwareness;
+    const oldView = this.currentView;
+    const oldPath = this.currentPath;
     this.currentPath = filePath;
     this.currentView = view;
+
     if (!filePath) {
       debugLog("collab", "no file path, clearing collab");
+      if (oldAwareness) oldAwareness.setLocalState(null);
       this.currentAwareness = null;
       view.dispatch({ effects: this.compartment.reconfigure([]) });
       return;
     }
+
     const docHandle = syncManager.getDoc(filePath);
     if (!docHandle) {
       debugLog("collab", `getDoc returned null for ${filePath}`);
-      this.currentAwareness = null;
+      this.currentPath = oldPath;
+      this.currentView = oldView;
       view.dispatch({ effects: this.compartment.reconfigure([]) });
       return;
     }
@@ -79,7 +70,8 @@ export class CollabManager {
       if (this.activationGen !== gen) return;
       debugLog("collab", `sync timed out for ${filePath}`);
       new Notice("Live Share: sync timed out");
-      this.currentAwareness = null;
+      this.currentPath = oldPath;
+      this.currentView = oldView;
       try {
         view.dispatch({ effects: this.compartment.reconfigure([]) });
       } catch {
@@ -108,6 +100,7 @@ export class CollabManager {
       applyMinimalYTextUpdate(docHandle.doc, docHandle.text, localContent);
     }
 
+    // Set up NEW awareness first, then clear old
     this.currentAwareness = docHandle.awareness;
     if (cursorUser) {
       debugLog("collab", `setting awareness user: ${JSON.stringify(cursorUser)}`);
@@ -132,6 +125,21 @@ export class CollabManager {
     const head = Y.createRelativePositionFromTypeIndex(docHandle.text, selection.head);
     debugLog("collab", `setting initial cursor selection.anchor=${selection.anchor} selection.head=${selection.head}`);
     docHandle.awareness.setLocalStateField("cursor", { anchor, head });
+
+    // NOW clear old awareness (after new one is live)
+    if (oldAwareness && oldAwareness !== docHandle.awareness) {
+      oldAwareness.setLocalState(null);
+    }
+    if (oldView && oldView !== view) {
+      try {
+        oldView.dispatch({
+          effects: this.compartment.reconfigure([]),
+        });
+      } catch {
+        // Previous view may have been destroyed
+      }
+    }
+
     debugLog("collab", `activateForFile complete for ${filePath}`);
   }
 
