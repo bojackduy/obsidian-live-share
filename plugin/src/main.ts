@@ -739,13 +739,10 @@ export default class LiveSharePlugin extends Plugin {
           }
         }
         if (scrollTop !== undefined) {
-          const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (mdView) {
-            const cmView = getCmView(mdView);
+          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (view) {
+            const cmView = getCmView(view);
             if (cmView) cmView.scrollDOM.scrollTop = scrollTop;
-          } else {
-            const remoteView = this.app.workspace.getActiveViewOfType(RemoteNoteView);
-            if (remoteView?.editor) remoteView.editor.scrollDOM.scrollTop = scrollTop;
           }
         }
       },
