@@ -1,6 +1,3 @@
-[submodule "live-share"]
-	path = live-share
-	url = https://github.com/azratul/live-share.nvim
 [submodule "live-share.nvim"]
 	path = live-share.nvim
 	url = https://github.com/azratul/live-share.nvim

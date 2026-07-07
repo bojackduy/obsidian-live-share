@@ -182,6 +182,10 @@
   border-radius: 50%;
 }
 
+.live-share-user-avatar-self {
+  cursor: pointer;
+}
+
 /* Info column */
 .live-share-user-info {
   flex: 1;

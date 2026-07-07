@@ -298,6 +298,16 @@ export default class LiveSharePlugin extends Plugin {
       view.setKickHandler((userId) => void this.kickUser(userId));
       view.setSummonHandler((userId) => this.summonUser(userId));
       view.setPermissionHandler((userId) => this.setUserPermission(userId));
+      view.setDisplayNameChangeHandler((name) => {
+        this.settings.displayName = name;
+        void this.saveSettings();
+        this.presenceManager?.debouncedBroadcastPresence();
+      });
+      view.setCursorColorChangeHandler((color) => {
+        this.settings.cursorColor = color;
+        void this.saveSettings();
+        this.presenceManager?.debouncedBroadcastPresence();
+      });
       return view;
     });
 

@@ -24,6 +24,8 @@ export class PresenceView extends ItemView {
   private onKickRequest: ((userId: string) => void) | null = null;
   private onSummonRequest: ((userId: string) => void) | null = null;
   private onSetPermissionRequest: ((userId: string) => void) | null = null;
+  private onDisplayNameChange: ((name: string) => void) | null = null;
+  private onCursorColorChange: ((color: string) => void) | null = null;
   private isHost = false;
   private followedUserId: string | null = null;
 
@@ -53,6 +55,14 @@ export class PresenceView extends ItemView {
 
   setPermissionHandler(handler: (userId: string) => void): void {
     this.onSetPermissionRequest = handler;
+  }
+
+  setDisplayNameChangeHandler(handler: (name: string) => void): void {
+    this.onDisplayNameChange = handler;
+  }
+
+  setCursorColorChangeHandler(handler: (color: string) => void): void {
+    this.onCursorColorChange = handler;
   }
 
   updateState(
@@ -148,13 +158,55 @@ export class PresenceView extends ItemView {
         avatar.setText(this.getInitial(user.displayName));
       }
 
+      if (isSelf) {
+        avatar.addClass("live-share-user-avatar-self");
+        avatar.addEventListener("click", () => {
+          const input = document.createElement("input");
+          input.type = "color";
+          input.value = HEX_COLOR_RE.test(user.cursorColor) ? user.cursorColor : "#7c3aed";
+          input.addEventListener("input", () => {
+            const color = input.value;
+            if (HEX_COLOR_RE.test(color)) {
+              avatar.setCssProps({ "--user-color": color });
+              this.onCursorColorChange?.(color);
+            }
+          });
+          input.click();
+        });
+      }
+
       const info = row.createEl("div", { cls: "live-share-user-info" });
 
       const nameRow = info.createEl("div", { cls: "live-share-user-name-row" });
-      nameRow.createEl("span", {
-        text: isSelf ? `${user.displayName} (You)` : user.displayName,
-        cls: "live-share-user-name",
-      });
+      if (isSelf) {
+        const nameSpan = nameRow.createEl("span", {
+          cls: "live-share-user-name",
+        });
+        nameSpan.setText(user.displayName);
+        nameSpan.contentEditable = "true";
+        nameSpan.addEventListener("blur", () => {
+          const val = nameSpan.textContent?.trim() || "Anonymous";
+          nameSpan.setText(val);
+          if (val !== user.displayName) {
+            this.onDisplayNameChange?.(val);
+          }
+        });
+        nameSpan.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            nameSpan.blur();
+          }
+        });
+        nameRow.createEl("span", {
+          text: "(You)",
+          cls: "live-share-user-badge",
+        });
+      } else {
+        nameRow.createEl("span", {
+          text: user.displayName,
+          cls: "live-share-user-name",
+        });
+      }
       if (user.isHost) {
         nameRow.createEl("span", {
           text: "Host",
