@@ -724,11 +724,20 @@ export default class LiveSharePlugin extends Plugin {
       notify: (msg) => this.notify(msg),
       openFileAndScroll: async (filePath, scrollTop) => {
         if (this.settings.role === "guest") {
-          const existing = this.findRemoteNoteLeaf(filePath);
-          if (existing) {
-            this.app.workspace.setActiveLeaf(existing);
+          const localFile = this.app.vault.getAbstractFileByPath(toLocalPath(filePath));
+          if (localFile instanceof TFile) {
+            const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
+            if (currentView?.file?.path !== toLocalPath(filePath)) {
+              await this.app.workspace.getLeaf().openFile(localFile);
+              this.onActiveFileChange();
+            }
           } else {
-            await this.openRemoteFile(filePath);
+            const existing = this.findRemoteNoteLeaf(filePath);
+            if (existing) {
+              this.app.workspace.setActiveLeaf(existing);
+            } else {
+              await this.openRemoteFile(filePath);
+            }
           }
         } else {
           const currentView = this.app.workspace.getActiveViewOfType(MarkdownView);
