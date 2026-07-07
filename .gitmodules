@@ -1,3 +1,6 @@
 [submodule "live-share.nvim"]
 	path = live-share.nvim
 	url = https://github.com/azratul/live-share.nvim
+[submodule "Relay"]
+	path = Relay
+	url = https://github.com/no-instructions/Relay
