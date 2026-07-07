@@ -724,8 +724,10 @@ export default class LiveSharePlugin extends Plugin {
       notify: (msg) => this.notify(msg),
       openFileAndScroll: async (filePath, scrollTop) => {
         if (this.settings.role === "guest") {
-          const remote = RemoteNoteView.getActive(this);
-          if (remote?.remotePath !== filePath) {
+          const existing = this.findRemoteNoteLeaf(filePath);
+          if (existing) {
+            this.app.workspace.setActiveLeaf(existing);
+          } else {
             await this.openRemoteFile(filePath);
           }
         } else {
@@ -739,10 +741,13 @@ export default class LiveSharePlugin extends Plugin {
           }
         }
         if (scrollTop !== undefined) {
-          const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-          if (view) {
-            const cmView = getCmView(view);
+          const mdView = this.app.workspace.getActiveViewOfType(MarkdownView);
+          if (mdView) {
+            const cmView = getCmView(mdView);
             if (cmView) cmView.scrollDOM.scrollTop = scrollTop;
+          } else {
+            const remoteView = this.app.workspace.getActiveViewOfType(RemoteNoteView);
+            if (remoteView?.editor) remoteView.editor.scrollDOM.scrollTop = scrollTop;
           }
         }
       },
@@ -1005,6 +1010,13 @@ export default class LiveSharePlugin extends Plugin {
     user.permission = newPermission;
     this.refreshPresenceView();
     this.notify(`Live Share: set ${user.displayName} to ${newPermission}`);
+  }
+
+  private findRemoteNoteLeaf(path: string): import("obsidian").WorkspaceLeaf | null {
+    for (const leaf of this.app.workspace.getLeavesOfType(REMOTE_NOTE_VIEW_TYPE)) {
+      if (leaf.view instanceof RemoteNoteView && leaf.view.remotePath === path) return leaf;
+    }
+    return null;
   }
 
   async openRemoteFile(path: string): Promise<void> {

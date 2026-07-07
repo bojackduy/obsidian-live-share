@@ -118,7 +118,7 @@ describe("RemoteNoteView", () => {
 
   it("getDisplayText shows file name when path is set", () => {
     view.setState({ path: "notes/doc.md" });
-    expect(view.getDisplayText()).toBe("doc.md");
+    expect(view.getDisplayText()).toBe("doc");
   });
 
   it("getState returns the current path", () => {

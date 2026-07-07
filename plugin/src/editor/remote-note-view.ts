@@ -40,7 +40,10 @@ export class RemoteNoteView extends ItemView {
   }
 
   getDisplayText(): string {
-    return this.path ? (this.path.split("/").pop() ?? "Remote Note") : "Remote Note";
+    if (!this.path) return "Remote Note";
+    const name = this.path.split("/").pop() ?? "Remote Note";
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(0, dot) : name;
   }
 
   getIcon(): string {
