@@ -16,6 +16,17 @@ function generatePassphrase(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function addServeoHeaders(headers: Record<string, string>, baseUrl: string): void {
+  try {
+    const host = new URL(baseUrl).hostname;
+    if (host.endsWith(".serveo.net") || host.endsWith(".serveousercontent.com")) {
+      headers["serveo-skip-browser-warning"] = "true";
+    }
+  } catch {
+    // Invalid URLs are handled by requestUrl below.
+  }
+}
+
 export class SessionManager {
   constructor(private plugin: LiveSharePlugin) {}
 
@@ -28,6 +39,7 @@ export class SessionManager {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
+    addServeoHeaders(headers, baseUrl);
     if (settings.serverPassword) headers["X-Server-Password"] = settings.serverPassword;
 
     let roomData: { id: string; token: string; name: string };
@@ -51,9 +63,10 @@ export class SessionManager {
       }
       roomData = createResponse.json;
       debugLog("session", `Room created: ${roomData.id}`);
-    } catch {
-      debugLog("session", "Room creation failed: cannot reach server");
-      new Notice("Live Share: cannot reach server");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      debugLog("session", `Room creation failed: ${msg} (URL: ${baseUrl}/rooms)`);
+      new Notice(`Live Share: cannot reach server — ${msg}`);
       return false;
     }
 
@@ -82,6 +95,7 @@ export class SessionManager {
     const joinHeaders: Record<string, string> = {
       "Content-Type": "application/json",
     };
+    addServeoHeaders(joinHeaders, baseUrl);
     if (serverPassword) joinHeaders["X-Server-Password"] = serverPassword;
 
     debugLog("session", `Joining room ${parsedInvite.r}`);
@@ -125,6 +139,7 @@ export class SessionManager {
       const deleteHeaders: Record<string, string> = {
         Authorization: `Bearer ${settings.token}`,
       };
+      addServeoHeaders(deleteHeaders, baseUrl);
       if (settings.serverPassword) deleteHeaders["X-Server-Password"] = settings.serverPassword;
       try {
         await requestUrl({
@@ -158,8 +173,10 @@ export class SessionManager {
     }
 
     debugLog("session", "Generating invite link");
+    const tStatus = this.plugin.tunnelManager?.getStatus();
+    const tunnelUrl = tStatus?.state === "connected" ? tStatus.url : null;
     const payload: InvitePayload = {
-      s: settings.serverUrl,
+      s: tunnelUrl || settings.serverUrl,
       r: settings.roomId,
       t: settings.token,
       e: settings.encryptionPassphrase || undefined,

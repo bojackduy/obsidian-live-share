@@ -24,6 +24,7 @@ import { SessionManager } from "./session/session";
 import { WORKSPACE_VIEW_TYPE, WorkspaceView } from "./session/workspace-view";
 import { ConnectionStateManager } from "./sync/connection-state";
 import { EmbeddedServer } from "./server/embedded-server";
+import { TunnelManager } from "./server/tunnel-manager";
 import { registerControlHandlers } from "./sync/control-handlers";
 import { ControlChannel } from "./sync/control-ws";
 import { E2ECrypto } from "./sync/crypto";
@@ -65,6 +66,7 @@ export default class LiveSharePlugin extends Plugin {
   logger!: DebugLogger;
 
   embeddedServer: EmbeddedServer | null = null;
+  tunnelManager: TunnelManager | null = null;
   canvasSync: CanvasSync | null = null;
   explorerIndicators: ExplorerIndicators | null = null;
   controlChannel: ControlChannel | null = null;
@@ -281,6 +283,7 @@ export default class LiveSharePlugin extends Plugin {
       this.settings.debugLogging,
     );
     setDebugLogger(this.logger);
+    this.tunnelManager = new TunnelManager();
     this.connectionStateUnsub = this.connectionState.onChange(() => this.updateStatusBar());
 
     this.registerEditorExtension(this.collabManager.getBaseExtension());
@@ -371,6 +374,7 @@ export default class LiveSharePlugin extends Plugin {
 
   onunload() {
     this.logger.destroy();
+    this.tunnelManager?.stop();
     void this.stopEmbeddedServer();
     this.controlChannel?.destroy();
     this.controlChannel = null;

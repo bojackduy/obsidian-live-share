@@ -1,5 +1,6 @@
-import { type App, PluginSettingTab, SettingGroup } from "obsidian";
+import { type App, Notice, PluginSettingTab, SettingGroup } from "obsidian";
 import type LiveSharePlugin from "../main";
+import type { TunnelProvider } from "../types";
 
 export class LiveShareSettingTab extends PluginSettingTab {
   private plugin: LiveSharePlugin;
@@ -83,6 +84,76 @@ export class LiveShareSettingTab extends PluginSettingTab {
             text.inputEl.placeholder = "Auto";
             if (srvStatus?.running) text.setDisabled(true);
           });
+      })
+      .addSetting((setting) => {
+        const tunnel = this.plugin.tunnelManager;
+        if (!tunnel) return;
+        this.plugin.tunnelManager!.onStatusChange(() => this.display());
+        const tStatus = tunnel.getStatus();
+        const providers: { value: TunnelProvider; label: string }[] = [
+          { value: "none", label: "Disabled" },
+          { value: "serveo.net", label: "serveo.net" },
+          { value: "localhost.run", label: "localhost.run" },
+          { value: "nokey@localhost.run", label: "nokey@localhost.run" },
+        ];
+
+        const isIdle = tStatus.state === "idle" || tStatus.state === "failed";
+        const isConnecting = tStatus.state === "connecting";
+        const isConnected = tStatus.state === "connected";
+
+        let statusText = "○ Disabled";
+        if (isConnecting) statusText = "○ Connecting...";
+        else if (isConnected) statusText = `● ${tStatus.url}`;
+        else if (tStatus.state === "failed") {
+          const hint = settings.tunnelProvider === "serveo.net" ? " — try localhost.run instead (serveo.net is often unreliable)" : "";
+          statusText = `✕ ${tStatus.error || "Failed"}${hint}`;
+        }
+
+        setting
+          .setName("Internet tunnel")
+          .setDesc("Expose the server over the internet using SSH tunneling (serveo.net / localhost.run). Requires SSH installed.")
+          .addDropdown((dropdown) => {
+            for (const p of providers) dropdown.addOption(p.value, p.label);
+            dropdown.setValue(settings.tunnelProvider);
+            dropdown.onChange(async (value) => {
+              settings.tunnelProvider = value as TunnelProvider;
+              await this.plugin.saveSettings();
+            });
+            if (!isIdle) dropdown.setDisabled(true);
+          })
+          .addExtraButton((btn) => {
+            if (isConnected || isConnecting) {
+              btn.setIcon("power")
+                .setTooltip("Stop tunnel")
+                .onClick(() => {
+                  tunnel.stop();
+                  this.display();
+                });
+            } else {
+              btn.setIcon("power")
+                .setTooltip("Start tunnel")
+                .onClick(async () => {
+                  if (!srvStatus?.running) {
+                    new Notice("Start the built-in server first");
+                    return;
+                  }
+                  if (settings.tunnelProvider === "none") {
+                    new Notice("Select a tunnel provider first");
+                    return;
+                  }
+                  tunnel.start(srvStatus.port, settings.tunnelProvider as TunnelProvider)
+                    .then(async (url) => {
+                      settings.serverUrl = url;
+                      await this.plugin.saveSettings();
+                      this.display();
+                    })
+                    .catch(() => {
+                      this.display();
+                    });
+                });
+            }
+          });
+        setting.setDesc(statusText);
       });
 
     new SettingGroup(containerEl)

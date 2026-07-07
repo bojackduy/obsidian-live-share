@@ -2,10 +2,13 @@ export type SessionRole = "host" | "guest" | null;
 
 export type Permission = "read-write" | "read-only";
 
+export type TunnelProvider = "none" | "serveo.net" | "localhost.run" | "nokey@localhost.run";
+
 export interface LiveShareSettings {
   serverUrl: string;
   useEmbeddedServer: boolean;
   embeddedServerPort: number;
+  tunnelProvider: TunnelProvider;
   roomId: string;
   token: string;
   jwt: string;
@@ -33,6 +36,7 @@ export const DEFAULT_SETTINGS: LiveShareSettings = {
   serverUrl: "http://localhost:3000",
   useEmbeddedServer: true,
   embeddedServerPort: 0,
+  tunnelProvider: "none",
   roomId: "",
   token: "",
   jwt: "",

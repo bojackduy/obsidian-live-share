@@ -71,6 +71,7 @@ function makeSettings(overrides: Partial<LiveShareSettings> = {}): LiveShareSett
     avatarUrl: "",
     cursorColor: "#000",
     sharedFolder: "",
+    tunnelProvider: "none",
     encryptionPassphrase: "",
     autoReconnect: false,
     notificationsEnabled: false,

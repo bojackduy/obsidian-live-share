@@ -15,6 +15,7 @@ function createSettings(overrides: Partial<LiveShareSettings> = {}): LiveShareSe
     displayName: "Test User",
     cursorColor: "#ff0000",
     sharedFolder: "",
+    tunnelProvider: "none",
     role: "host",
     encryptionPassphrase: "",
     permission: "read-write",
