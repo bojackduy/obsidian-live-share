@@ -416,7 +416,7 @@ export class EmbeddedServer {
         else if (msg.type === "host-transfer-offer" && client.isHost) this.handleControlTransferOffer(room, client, msg);
         else if (msg.type === "host-transfer-accept") this.handleControlTransferAccept(room, client, msg, serverRoom, roomId);
         else if (msg.type === "host-transfer-decline") this.handleControlTransferDecline(room, client, msg);
-        else if (msg.type === "presence-update") this.handleControlPresenceUpdate(room, client, msg);
+        else if (msg.type === "presence-update") this.handleControlPresenceUpdate(room, client, msg, data.toString(), ws);
         else {
           if (!client.isApproved) return;
           if (HOST_ONLY_TYPES.has(msg.type) && !client.isHost) return;
@@ -624,11 +624,12 @@ export class EmbeddedServer {
     if (oldHost) this.sendJson(oldHost.ws, { type: "host-transfer-decline", userId: client.userId, displayName: client.displayName });
   }
 
-  private handleControlPresenceUpdate(room: ControlRoom, client: ControlClient, msg: Record<string, unknown>) {
+  private handleControlPresenceUpdate(room: ControlRoom, client: ControlClient, msg: Record<string, unknown>, rawData: string, senderWs: WebSocket) {
     if (typeof msg.userId === "string" && msg.userId && !client.userId) {
       client.userId = msg.userId.slice(0, 128);
     }
     if (typeof msg.displayName === "string") client.displayName = msg.displayName.slice(0, 100);
+    this.broadcastControl(room, rawData, senderWs);
   }
 
   private handleControlDisconnect(ws: WebSocket, room: ControlRoom, roomId: string) {
