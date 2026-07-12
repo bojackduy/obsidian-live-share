@@ -23,6 +23,7 @@ import { PRESENCE_VIEW_TYPE, type PresenceUser, PresenceView } from "./session/p
 import { SessionManager } from "./session/session";
 import { WORKSPACE_VIEW_TYPE, WorkspaceView } from "./session/workspace-view";
 import { ConnectionStateManager } from "./sync/connection-state";
+import { SyncStatus } from "./sync/sync-status";
 import { EmbeddedServer } from "./server/embedded-server";
 import { TunnelManager } from "./server/tunnel-manager";
 import { registerControlHandlers } from "./sync/control-handlers";
@@ -65,6 +66,7 @@ export default class LiveSharePlugin extends Plugin {
   exclusionManager!: ExclusionManager;
   backgroundSync!: BackgroundSync;
   connectionState!: ConnectionStateManager;
+  syncStatus!: SyncStatus;
   logger!: DebugLogger;
 
   embeddedServer: EmbeddedServer | null = null;
@@ -297,13 +299,17 @@ export default class LiveSharePlugin extends Plugin {
     this.exclusionManager.setConfigDir(this.app.vault.configDir);
     this.exclusionManager.setPatterns(this.settings.excludePatterns);
     this.manifestManager.setExclusionManager(this.exclusionManager);
+    this.manifestManager.setSyncStatus(this.syncStatus);
     this.backgroundSync = new BackgroundSync(
       this.app.vault,
       this.syncManager,
       this.manifestManager,
       this.fileOpsManager,
+      this.syncStatus,
     );
     this.connectionState = new ConnectionStateManager();
+    this.syncStatus = new SyncStatus();
+    this.syncStatus.onChange(() => this.updateStatusBar());
     this.logger = new DebugLogger(
       this.app.vault,
       this.settings.debugLogPath,
@@ -414,6 +420,7 @@ export default class LiveSharePlugin extends Plugin {
     this.removeScrollListener();
     this.connectionStateUnsub?.();
     this.connectionStateUnsub = null;
+    this.syncStatus?.destroy();
 
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (activeView) {
@@ -502,6 +509,7 @@ export default class LiveSharePlugin extends Plugin {
     this.canvasSync = null;
     this.backgroundSync.setCollabBoundFile(null);
     this.backgroundSync.destroy();
+    this.syncStatus?.destroy();
     this.syncManager.disconnect();
     this.controlChannel?.destroy();
     this.controlChannel = null;
@@ -877,6 +885,8 @@ export default class LiveSharePlugin extends Plugin {
 
   updateStatusBar() {
     const state = this.connectionState.getState();
+    const pending = this.syncStatus?.getPendingCount() ?? 0;
+    const errors = this.syncStatus?.getErrorCount() ?? 0;
     switch (state) {
       case "disconnected":
         this.statusBarEl.setText("Live Share: off");
@@ -894,7 +904,8 @@ export default class LiveSharePlugin extends Plugin {
         const latency = this.controlChannel?.getLatency();
         const latencyStr = latency ? ` ${latency}ms` : "";
         const presentingLabel = this.presenceManager?.getIsPresenting() ? " [presenting]" : "";
-        this.statusBarEl.setText(`Live Share: ${role}${users}${latencyStr}${presentingLabel}`);
+        const syncLabel = pending > 0 ? ` [${pending} pending]` : errors > 0 ? ` [${errors} err]` : "";
+        this.statusBarEl.setText(`Live Share: ${role}${users}${latencyStr}${presentingLabel}${syncLabel}`);
         break;
       }
       case "error":

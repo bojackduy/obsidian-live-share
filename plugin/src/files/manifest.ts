@@ -2,6 +2,7 @@ import { Notice, type TFile, TFolder, type Vault } from "obsidian";
 import type * as Y from "yjs";
 
 import type { DocHandle, SyncManager } from "../sync/sync";
+import type { SyncStatus } from "../sync/sync-status";
 import type { LiveShareSettings } from "../types";
 import {
   VAULT_EVENT_SETTLE_MS,
@@ -42,11 +43,16 @@ export class ManifestManager {
   private observer: ((events: Y.YMapEvent<FileEntry>) => void) | null = null;
 
   private exclusionManager: ExclusionManager | null = null;
+  private syncStatus: SyncStatus | null = null;
 
   constructor(
     private vault: Vault,
     private settings: LiveShareSettings,
   ) {}
+
+  setSyncStatus(syncStatus: SyncStatus): void {
+    this.syncStatus = syncStatus;
+  }
 
   setExclusionManager(manager: ExclusionManager) {
     this.exclusionManager = manager;
@@ -192,6 +198,7 @@ export class ManifestManager {
 
       if (entry.binary) {
         debugLog("manifest", `syncFromManifest: ${path} requesting binary`);
+        this.syncStatus?.setState(path, "syncing");
         requestBinary?.(path);
         synced++;
         continue;
@@ -209,6 +216,7 @@ export class ManifestManager {
         const parentDir = diskPath.substring(0, diskPath.lastIndexOf("/"));
         if (parentDir) await ensureFolder(this.vault, parentDir);
 
+        this.syncStatus?.setState(path, "syncing");
         mute?.(diskPath);
         try {
           if (localFile) {
@@ -216,14 +224,15 @@ export class ManifestManager {
           } else {
             await this.vault.create(diskPath, content);
           }
+          this.syncStatus?.setState(path, "idle");
         } finally {
           if (unmute) {
             setTimeout(() => unmute(diskPath), VAULT_EVENT_SETTLE_MS);
           }
         }
         synced++;
-      } catch {
-        // Failed to sync individual file, continue with rest
+      } catch (err) {
+        this.syncStatus?.setState(path, "error", String(err));
       }
     }
 

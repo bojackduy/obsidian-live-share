@@ -2,6 +2,7 @@ import { Notice, type Vault } from "obsidian";
 import type * as Y from "yjs";
 
 import type { SyncManager } from "../sync/sync";
+import type { SyncStatus } from "../sync/sync-status";
 import type { SessionRole } from "../types";
 import {
   VAULT_EVENT_SETTLE_MS,
@@ -38,6 +39,7 @@ export class BackgroundSync {
     private syncManager: SyncManager,
     private manifestManager: ManifestManager,
     private fileOpsManager: FileOpsManager,
+    private syncStatus?: SyncStatus,
   ) {}
 
   isRunning(): boolean {
@@ -345,7 +347,11 @@ export class BackgroundSync {
   private writeToDisk(path: string, content: string): Promise<void> {
     debugLog("bg-sync", `writeToDisk: ${path} contentLen=${content.length}`);
     if (this.lastWrittenContent.get(path) === content) return Promise.resolve();
-    this.writeQueue = this.writeQueue.then(() => this.doWriteToDisk(path, content));
+    this.syncStatus?.setState(path, "queued");
+    this.writeQueue = this.writeQueue.then(() => {
+      this.syncStatus?.setState(path, "syncing");
+      return this.doWriteToDisk(path, content);
+    });
     return this.writeQueue;
   }
 
@@ -362,13 +368,19 @@ export class BackgroundSync {
           this.lastWrittenContent.set(path, content);
           return;
         }
+        if (content.length === 0 && existing.length > 0) {
+          debugLog("bg-sync", `doWriteToDisk: ${path} skip empty write (disk has ${existing.length} chars)`);
+          return;
+        }
       }
       const parentDir = diskPath.substring(0, diskPath.lastIndexOf("/"));
       if (parentDir) await ensureFolder(this.vault, parentDir);
       await this.vault.adapter.write(diskPath, content);
       this.lastWrittenContent.set(path, content);
-    } catch {
+      this.syncStatus?.setState(path, "idle");
+    } catch (err) {
       new Notice(`Live Share: failed to write ${diskPath}`);
+      this.syncStatus?.setState(path, "error", String(err));
     } finally {
       setTimeout(() => {
         this.recentDiskWrites.delete(path);

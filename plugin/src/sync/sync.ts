@@ -44,6 +44,8 @@ export class SyncManager {
     string,
     (changes: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => void
   >();
+  private awarenessRaf = new Map<string, number>();
+  private awarenessPendingClients = new Map<string, Set<number>>();
   private settings: LiveShareSettings;
   private isConnected = false;
   private ws: WebSocket | null = null;
@@ -148,9 +150,27 @@ export class SyncManager {
       if (origin === "remote") return;
       const changedClients = changes.added.concat(changes.updated, changes.removed);
       if (changedClients.length === 0) return;
-      debugLog("sync", `awareness update ${filePath} changed=${changedClients.join(",")} origin=${origin === "remote" ? "remote" : "local"}`);
-      const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
-      this.sendMux(filePath, MUX_AWARENESS, awarenessUpdate);
+      debugLog("sync", `awareness update ${filePath} origin=${origin === "remote" ? "remote" : "local"}`);
+
+      let pending = this.awarenessPendingClients.get(filePath);
+      if (!pending) {
+        pending = new Set();
+        this.awarenessPendingClients.set(filePath, pending);
+      }
+      for (const c of changedClients) pending.add(c);
+
+      if (this.awarenessRaf.has(filePath)) return;
+      this.awarenessRaf.set(
+        filePath,
+        requestAnimationFrame(() => {
+          this.awarenessRaf.delete(filePath);
+          const toSend = this.awarenessPendingClients.get(filePath);
+          this.awarenessPendingClients.delete(filePath);
+          if (!toSend || toSend.size === 0) return;
+          const update = awarenessProtocol.encodeAwarenessUpdate(awareness, Array.from(toSend));
+          this.sendMux(filePath, MUX_AWARENESS, update);
+        }),
+      );
     };
     awareness.on("update", awarenessHandler);
     this.awarenessHandlers.set(filePath, awarenessHandler);
@@ -188,6 +208,11 @@ export class SyncManager {
     }
     this.docs.delete(filePath);
     this.updateHandlers.delete(filePath);
+
+    const raf = this.awarenessRaf.get(filePath);
+    if (raf) cancelAnimationFrame(raf);
+    this.awarenessRaf.delete(filePath);
+    this.awarenessPendingClients.delete(filePath);
 
     this.synced.delete(filePath);
     this.syncListeners.delete(filePath);
