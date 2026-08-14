@@ -27,29 +27,29 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       if (!plugin.manifestManager.isSharedPath(originalPath)) return;
       if (plugin.fileOpsManager.isPathMuted(originalPath)) return;
       if (renamedPaths.has(originalPath)) return;
-      if (plugin.settings.role === "host") {
-        void plugin.fileOpsManager.onFileCreate(file);
-      }
-      if (plugin.settings.role === "host") {
-        if (file instanceof TFile) {
-          void (async () => {
-            try {
-              const content = isTextFile(originalPath)
-                ? await plugin.app.vault.read(file)
-                : await plugin.app.vault.readBinary(file);
-              if (renamedPaths.has(originalPath)) return;
-              if (isTextFile(originalPath)) {
-                await plugin.backgroundSync.onFileAdded(originalPath);
-              }
-              if (renamedPaths.has(originalPath)) return;
-              await plugin.manifestManager.updateFile(file, content);
-            } catch {
-              if (!renamedPaths.has(originalPath)) {
-                new Notice(`Live Share: failed to update manifest for ${originalPath}`);
-              }
+      plugin.fileOpsManager.onFileCreate(file);
+      if (file instanceof TFile) {
+        void (async () => {
+          try {
+            const content = isTextFile(originalPath)
+              ? await plugin.app.vault.read(file)
+              : await plugin.app.vault.readBinary(file);
+            if (renamedPaths.has(originalPath)) return;
+            if (isTextFile(originalPath)) {
+              await plugin.backgroundSync.onFileAdded(originalPath);
             }
-          })();
-        } else {
+            if (renamedPaths.has(originalPath)) return;
+            if (plugin.settings.role === "host") {
+              await plugin.manifestManager.updateFile(file, content);
+            }
+          } catch {
+            if (!renamedPaths.has(originalPath)) {
+              new Notice(`Live Share: failed to update manifest for ${originalPath}`);
+            }
+          }
+        })();
+      } else {
+        if (plugin.settings.role === "host") {
           plugin.manifestManager.addFolder(originalPath);
         }
       }
@@ -61,11 +61,9 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       const run = () => {
         if (!plugin.manifestManager.isSharedPath(file.path)) return;
         if (plugin.fileOpsManager.isPathMuted(file.path)) return;
+        plugin.fileOpsManager.onFileDelete(file);
+        plugin.backgroundSync.onFileRemoved(file.path);
         if (plugin.settings.role === "host") {
-          plugin.fileOpsManager.onFileDelete(file);
-        }
-        if (plugin.settings.role === "host") {
-          plugin.backgroundSync.onFileRemoved(file.path);
           plugin.manifestManager.removeFile(file.path);
         }
       };
@@ -94,11 +92,12 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
 
       const prev = pendingRename ?? Promise.resolve();
       const task = prev.then(async () => {
-        if (plugin.settings.role !== "host") return;
         plugin.fileOpsManager.onFileRename(file, oldPath);
         plugin.backgroundSync.cancelSubscribe(oldPath);
         await plugin.backgroundSync.onFileRenamed(oldPath, file.path);
-        plugin.manifestManager.renameFile(oldPath, file.path, plugin.syncManager);
+        if (plugin.settings.role === "host") {
+          plugin.manifestManager.renameFile(oldPath, file.path, plugin.syncManager);
+        }
         const activeFile = plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file;
         if (activeFile && (activeFile.path === file.path || activeFile.path === oldPath)) {
           plugin.onActiveFileChange();
@@ -117,7 +116,6 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
       if (plugin.fileOpsManager.isPathMuted(file.path)) return;
 
       if (isTextFile(file.path)) {
-        if (plugin.settings.role !== "host") return;
         if (plugin.backgroundSync.isRecentDiskWrite(file.path)) return;
         if (
           file.path.endsWith(".canvas") &&
@@ -129,9 +127,7 @@ export function registerVaultEvents(plugin: LiveSharePlugin): void {
         void plugin.backgroundSync.handleLocalTextModify(file.path);
         return;
       }
-      if (plugin.settings.role === "host") {
-        void plugin.fileOpsManager.onFileModify(file);
-      }
+      plugin.fileOpsManager.onFileModify(file);
       if (plugin.settings.role === "host") {
         void (async () => {
           try {

@@ -32,7 +32,39 @@ export class SessionManager {
 
   async startSession(): Promise<boolean> {
     const { settings } = this.plugin;
-    const baseUrl = settings.serverUrl.replace(/\/+$/, "");
+
+    // Make sure the embedded server is up, and the SSH tunnel is running,
+    // BEFORE the room is created so the invite always carries a reachable URL.
+    let baseUrl = settings.serverUrl.replace(/\/+$/, "");
+    if (settings.useEmbeddedServer) {
+      await this.plugin.ensureEmbeddedServer();
+      const srvStatus = this.plugin.embeddedServer?.status;
+      if (srvStatus?.running) {
+        const localUrl = `http://127.0.0.1:${srvStatus.port}`;
+        if (settings.serverUrl !== localUrl) {
+          settings.serverUrl = localUrl;
+          await this.plugin.saveSettings();
+        }
+        baseUrl = localUrl;
+        const tunnel = this.plugin.tunnelManager;
+        if (tunnel && settings.tunnelProvider !== "none") {
+          try {
+            const tStatus = tunnel.getStatus();
+            if (tStatus.state === "connected" && tStatus.url) {
+              settings.publicServerUrl = tStatus.url;
+            } else if (!tunnel.isRunning()) {
+              settings.publicServerUrl = await tunnel.start(srvStatus.port, settings.tunnelProvider);
+            }
+            await this.plugin.saveSettings();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            settings.publicServerUrl = "";
+            debugLog("session", `Tunnel failed: ${msg}`);
+            new Notice(`Live Share: tunnel failed — ${msg}. Guests can still join over LAN.`);
+          }
+        }
+      }
+    }
 
     debugLog("session", `Creating room at ${baseUrl}/rooms`);
 
@@ -158,6 +190,7 @@ export class SessionManager {
     settings.encryptionPassphrase = "";
     settings.role = null;
     settings.permission = "read-write";
+    settings.publicServerUrl = "";
     await this.plugin.saveSettings();
   }
 
@@ -175,8 +208,9 @@ export class SessionManager {
     debugLog("session", "Generating invite link");
     const tStatus = this.plugin.tunnelManager?.getStatus();
     const tunnelUrl = tStatus?.state === "connected" ? tStatus.url : null;
+    const inviteUrl = tunnelUrl || settings.publicServerUrl || settings.serverUrl;
     const payload: InvitePayload = {
-      s: tunnelUrl || settings.serverUrl,
+      s: inviteUrl,
       r: settings.roomId,
       t: settings.token,
       e: settings.encryptionPassphrase || undefined,

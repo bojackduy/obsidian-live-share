@@ -133,8 +133,6 @@ export default class LiveSharePlugin extends Plugin {
     this.manifestManager.setManifestChangeHandler((added, removed, updated) => {
       this.manifestHandlerQueue = this.manifestHandlerQueue
         .then(async () => {
-          if (this.settings.role !== "host") return;
-
           const renamedOldPaths = new Set<string>();
           const renamedNewPaths = new Set<string>();
           if (added.length > 0 && removed.length > 0) {
@@ -439,12 +437,17 @@ export default class LiveSharePlugin extends Plugin {
     try {
       await this.connectSync();
       await this.manifestManager.connect(this.syncManager);
+      this.registerManifestChangeHandler();
       if (this.settings.role === "host") {
         await this.manifestManager.publishManifest({ purge: true });
         await this.backgroundSync.startAll("host");
-        this.registerManifestChangeHandler();
       } else {
         await this.backgroundSync.startAll("guest");
+        await this.manifestManager.syncFromManifest(
+          this.mutePathEvents,
+          this.unmutePathEvents,
+          this.requestBinaryFile,
+        );
         this.onActiveFileChange();
       }
     } catch {
@@ -582,6 +585,12 @@ export default class LiveSharePlugin extends Plugin {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
           await this.backgroundSync.startAll("guest");
+          this.registerManifestChangeHandler();
+          await this.manifestManager.syncFromManifest(
+            this.mutePathEvents,
+            this.unmutePathEvents,
+            this.requestBinaryFile,
+          );
           this.onActiveFileChange();
           this.logger.log("session", `joined, room=${this.settings.roomId}`);
           this.notify("Live Share: joined session, open a remote note to edit");
@@ -608,6 +617,12 @@ export default class LiveSharePlugin extends Plugin {
           await this.connectSync();
           await this.manifestManager.connect(this.syncManager);
           await this.backgroundSync.startAll("guest");
+          this.registerManifestChangeHandler();
+          await this.manifestManager.syncFromManifest(
+            this.mutePathEvents,
+            this.unmutePathEvents,
+            this.requestBinaryFile,
+          );
           this.onActiveFileChange();
           this.logger.log("session", `joined via link, room=${this.settings.roomId}`);
           this.notify("Live Share: joined session, open a remote note to edit");

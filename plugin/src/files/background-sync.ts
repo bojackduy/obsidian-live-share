@@ -97,9 +97,13 @@ export class BackgroundSync {
           if (this.cancelledSubscribes.has(path)) return;
           const remoteContent = docHandle.text.toString();
           if (remoteContent.length === 0) {
-            // No remote content yet - host seeds the Y.Text
+            // No remote content yet - host seeds the Y.Text and marks the doc
+            // as seeded so guests can distinguish "empty file" from "not yet synced"
             debugLog("bg-sync", `subscribe: ${path} host seeding Y.Text (len=${content.length})`);
-            applyMinimalYTextUpdate(docHandle.doc, docHandle.text, content);
+            docHandle.doc.transact(() => {
+              applyMinimalYTextUpdate(docHandle.doc, docHandle.text, content);
+              docHandle.doc.getMap("meta").set("seeded", true);
+            });
             this.lastWrittenContent.set(path, content);
           } else if (remoteContent !== content) {
             // Remote has content (from guests or prior sync) - write remote to disk instead
@@ -111,20 +115,21 @@ export class BackgroundSync {
           }
         }
       } else if (this.role === "guest") {
-        // Wait for host to seed Y.Text if it's empty
-        if (docHandle.text.length === 0) {
+        // Wait for the host to seed Y.Text (or mark the doc as seeded for
+        // genuinely empty files) before deciding what to write to disk
+        if (docHandle.text.length === 0 && !docHandle.doc.getMap("meta").get("seeded")) {
           for (let i = 0; i < 20; i++) {
             await new Promise((resolve) => setTimeout(resolve, 100));
             if (this.cancelledSubscribes.has(path)) return;
             if (docHandle.doc.isDestroyed) return;
-            if (docHandle.text.length > 0) break;
+            if (docHandle.text.length > 0 || docHandle.doc.getMap("meta").get("seeded")) break;
           }
         }
         const file = getFileByPath(this.vault, diskPath);
         const remoteContent = docHandle.text.toString();
         debugLog("bg-sync", `subscribe: ${path} guest remoteLen=${remoteContent.length}`);
         const localContent = file ? normalizeLineEndings(await this.vault.read(file)) : "";
-        if (remoteContent !== localContent) {
+        if (!file || remoteContent !== localContent) {
           debugLog("bg-sync", `subscribe: ${path} guest writing remote to disk`);
           await this.writeToDisk(path, remoteContent);
         } else {
@@ -240,13 +245,24 @@ export class BackgroundSync {
         const file = getFileByPath(this.vault, diskNew);
         if (file) {
           const content = normalizeLineEndings(await this.vault.read(file));
-          applyMinimalYTextUpdate(docHandle.doc, docHandle.text, content);
+          docHandle.doc.transact(() => {
+            applyMinimalYTextUpdate(docHandle.doc, docHandle.text, content);
+            docHandle.doc.getMap("meta").set("seeded", true);
+          });
         }
-      } else if (docHandle.text.length > 0) {
+      } else {
+        if (docHandle.text.length === 0 && !docHandle.doc.getMap("meta").get("seeded")) {
+          for (let i = 0; i < 20; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            if (this.cancelledSubscribes.has(normNew)) return;
+            if (docHandle.doc.isDestroyed) return;
+            if (docHandle.text.length > 0 || docHandle.doc.getMap("meta").get("seeded")) break;
+          }
+        }
         const file = getFileByPath(this.vault, diskNew);
         const remoteContent = docHandle.text.toString();
         const localContent = file ? normalizeLineEndings(await this.vault.read(file)) : "";
-        if (remoteContent !== localContent) {
+        if (!file || remoteContent !== localContent) {
           await this.writeToDisk(normNew, remoteContent);
         }
       }
@@ -366,10 +382,6 @@ export class BackgroundSync {
         const existing = normalizeLineEndings(await this.vault.read(file));
         if (existing === content) {
           this.lastWrittenContent.set(path, content);
-          return;
-        }
-        if (content.length === 0 && existing.length > 0) {
-          debugLog("bg-sync", `doWriteToDisk: ${path} skip empty write (disk has ${existing.length} chars)`);
           return;
         }
       }

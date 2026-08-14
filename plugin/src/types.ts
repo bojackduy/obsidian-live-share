@@ -6,6 +6,7 @@ export type TunnelProvider = "none" | "serveo.net" | "localhost.run" | "nokey@lo
 
 export interface LiveShareSettings {
   serverUrl: string;
+  publicServerUrl?: string;
   useEmbeddedServer: boolean;
   embeddedServerPort: number;
   tunnelProvider: TunnelProvider;
@@ -34,6 +35,7 @@ export interface LiveShareSettings {
 
 export const DEFAULT_SETTINGS: LiveShareSettings = {
   serverUrl: "http://localhost:3000",
+  publicServerUrl: "",
   useEmbeddedServer: true,
   embeddedServerPort: 0,
   tunnelProvider: "none",

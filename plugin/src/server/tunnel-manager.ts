@@ -120,7 +120,26 @@ export class TunnelManager {
       });
 
       proc.on("close", (code, signal) => {
-        if (this.settled) return;
+        if (this.settled) {
+          // The tunnel was running and its SSH process just died. Surface this
+          // instead of leaving the status stuck at "connected".
+          if (this.status.state === "connected") {
+            let msg: string;
+            if (signal) {
+              msg = `Tunnel process killed by signal ${signal}`;
+            } else if (code !== null) {
+              msg = `Tunnel process exited with code ${code}`;
+            } else {
+              msg = "Tunnel process exited unexpectedly";
+            }
+            const log = this.readLog();
+            if (log) msg += `\nLog: ${log.slice(0, 800)}`;
+            this.cleanupPollTimer();
+            this.status = { state: "failed", error: msg };
+            this.emitStatus();
+          }
+          return;
+        }
         this.settled = true;
         this.cleanupPollTimer();
         this.cleanupProc();

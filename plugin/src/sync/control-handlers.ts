@@ -57,32 +57,46 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
       if (paths.some((path) => !plugin.manifestManager.isSharedPath(path))) return;
     }
 
-    if (plugin.settings.role !== "host") {
-      return;
-    }
-
     plugin.fileOpsManager
       .applyRemoteOp(op, async () => {
-        if (plugin.settings.role !== "host") return;
-        if (op.type === "create" && "path" in op) {
-          const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(op.path));
-          if (file instanceof TFile) {
-            const content = isTextFile(file.path)
-              ? await plugin.app.vault.read(file)
-              : await plugin.app.vault.readBinary(file);
-            await plugin.manifestManager.updateFile(file, content);
-            if (isTextFile(file.path)) {
-              await plugin.backgroundSync.onFileAdded(file.path);
+        if (plugin.settings.role === "host") {
+          if (op.type === "create" && "path" in op) {
+            const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(op.path));
+            if (file instanceof TFile) {
+              const content = isTextFile(file.path)
+                ? await plugin.app.vault.read(file)
+                : await plugin.app.vault.readBinary(file);
+              await plugin.manifestManager.updateFile(file, content);
+              if (isTextFile(file.path)) {
+                await plugin.backgroundSync.onFileAdded(file.path);
+              }
             }
+          } else if (op.type === "modify" && "path" in op && !isTextFile(op.path)) {
+            const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(op.path));
+            if (file instanceof TFile) {
+              const content = await plugin.app.vault.readBinary(file);
+              await plugin.manifestManager.updateFile(file, content);
+            }
+          } else if (op.type === "delete" && "path" in op) {
+            plugin.manifestManager.removeFile(op.path);
+            plugin.backgroundSync.onFileRemoved(op.path);
+          } else if (op.type === "rename" && "oldPath" in op && "newPath" in op) {
+            const renameOp = op as {
+              oldPath: string;
+              newPath: string;
+            };
+            if (isTextFile(renameOp.newPath)) {
+              await plugin.backgroundSync.onFileRenamed(renameOp.oldPath, renameOp.newPath);
+            }
+            plugin.manifestManager.renameFile(renameOp.oldPath, renameOp.newPath, plugin.syncManager);
+          } else if (op.type === "folder-create" && "path" in op) {
+            plugin.manifestManager.addFolder(op.path);
           }
-        } else if (op.type === "modify" && "path" in op && !isTextFile(op.path)) {
-          const file = plugin.app.vault.getAbstractFileByPath(toLocalPath(op.path));
-          if (file instanceof TFile) {
-            const content = await plugin.app.vault.readBinary(file);
-            await plugin.manifestManager.updateFile(file, content);
-          }
+          return;
+        }
+        if (op.type === "create" && "path" in op && isTextFile(op.path)) {
+          await plugin.backgroundSync.onFileAdded(op.path);
         } else if (op.type === "delete" && "path" in op) {
-          plugin.manifestManager.removeFile(op.path);
           plugin.backgroundSync.onFileRemoved(op.path);
         } else if (op.type === "rename" && "oldPath" in op && "newPath" in op) {
           const renameOp = op as {
@@ -92,9 +106,6 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
           if (isTextFile(renameOp.newPath)) {
             await plugin.backgroundSync.onFileRenamed(renameOp.oldPath, renameOp.newPath);
           }
-          plugin.manifestManager.renameFile(renameOp.oldPath, renameOp.newPath, plugin.syncManager);
-        } else if (op.type === "folder-create" && "path" in op) {
-          plugin.manifestManager.addFolder(op.path);
         }
       })
       .catch((err) => {
@@ -110,7 +121,6 @@ export function registerControlHandlers(plugin: LiveSharePlugin): void {
   ] as const) {
     channel.on(chunkType, (msg) => {
       debugLog("ctrl-handler", `${chunkType} path=${msg.path}`);
-      if (plugin.settings.role !== "host") return;
       if (!msg.path || !plugin.manifestManager.isSharedPath(msg.path)) return;
       plugin.fileOpsManager
         .applyRemoteOp({

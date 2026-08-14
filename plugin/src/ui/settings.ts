@@ -127,6 +127,10 @@ export class LiveShareSettingTab extends PluginSettingTab {
                 .setTooltip("Stop tunnel")
                 .onClick(() => {
                   tunnel.stop();
+                  if (settings.publicServerUrl) {
+                    settings.publicServerUrl = "";
+                    void this.plugin.saveSettings();
+                  }
                   this.display();
                 });
             } else {
@@ -143,7 +147,7 @@ export class LiveShareSettingTab extends PluginSettingTab {
                   }
                   tunnel.start(srvStatus.port, settings.tunnelProvider as TunnelProvider)
                     .then(async (url) => {
-                      settings.serverUrl = url;
+                      settings.publicServerUrl = url;
                       await this.plugin.saveSettings();
                       this.display();
                     })
